@@ -1,0 +1,22 @@
+2026-08-11  Arka Mondal  <arkamondalofficial@gmail.com>
+
+	Version 0.1.0.
+
+	* Makefile: New file.
+	* LICENSE: New file.
+	* README.md: New file.
+	* src/newfile.h: New file.
+	* src/main.c: New file.
+	* src/error.c: New file.
+	* src/parse.c: New file.
+	* src/fileops.c: New file.
+	* src/fastio.c: New file.
+	* src/options.c: New file.
+	* src/optparse.h: New file.
+	* src/optparse.c: New file.
+	* doc/newfile.1: New file.
+	* tests/run_tests.sh: New file.
+
+Copyright (c) 2026, Arka Mondal. All rights reserved.
+Use of this source code is governed by a BSD-style license that
+can be found in the LICENSE file.

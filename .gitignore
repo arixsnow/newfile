@@ -1,0 +1,6 @@
+# Build directories, including alternates made with BUILDDIR=
+/build*/
+
+# Release tarballs
+/newfile-*/
+*.tar.xz

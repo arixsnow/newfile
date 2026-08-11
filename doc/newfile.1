@@ -1,0 +1,377 @@
+.\" Copyright (c) 2026, Arka Mondal. All rights reserved.
+.\" Use of this source code is governed by a BSD-style license that
+.\" can be found in the LICENSE file.
+.TH NEWFILE 1 "August 2026" "newfile 0.1.0" "User Commands"
+.SH NAME
+newfile \- create files with specified attributes
+.SH SYNOPSIS
+.B newfile
+[\fB\-Abfpv\fR] [\fB\-m\fR \fImode\fR] [\fB\-o\fR \fIowner\fR[:\fIgroup\fR]]
+[\fB\-s\fR \fIsize\fR]
+.br
+.in +8n
+[\fB\-\-reference\fR=\fIfile\fR] [\fB\-\-sparse\fR]
+[\fB\-\-template\fR=\fIfile\fR] \fIfile\fR ...
+.in
+.SH DESCRIPTION
+.B newfile
+creates each
+.I file
+with the mode, ownership, size and initial content given on the command
+line, in a single invocation.
+.PP
+Each
+.I file
+is opened with owner read and write only, filled, given its owner, then
+given the requested mode, so it is never readable under the wrong
+ownership.  A file that cannot be completed is not created: if any step
+fails, or the run is interrupted by a signal, the partial file is
+removed.
+.PP
+By default an existing
+.I file
+is not replaced.  The underlying
+.BR open (2)
+call uses
+.BR O_EXCL ,
+so the existence check and the creation are atomic: if two processes
+race to create the same path, only one succeeds.  Pass
+.B \-f
+to replace an existing file.  The replacement is committed with
+.BR rename (2),
+which is atomic in the same way.
+.PP
+An operand ending in a slash names a directory and is rejected, because
+.B newfile
+creates only regular files.  Paths are otherwise handed to the system
+as typed, so a
+.B ..
+component follows a symbolic link rather than cancelling the name in
+front of it.
+.PP
+If
+.B \-m
+is not given, the mode defaults to
+.BR a=rw ,
+subject to the process umask.  Pass
+.B \-A
+to apply the requested bits exactly, ignoring the umask.
+.PP
+Long options must be spelled in full.  Options may appear before or
+after the file operands.
+.SH OPTIONS
+.TP
+\fB\-m\fR, \fB\-\-mode\fR=\fImode\fR
+Set the file permission bits.
+.I mode
+may be octal (e.g.\& \fB0755\fR) or symbolic (e.g.\&
+\fBu=rwx,g=rx,o=r\fR).  The symbolic syntax is
+\fB[ugoa...][=+-][rwxst...][,...]\fR, a subset of the
+.BR chmod (1)
+syntax.  Each clause takes a single operator.  The
+.BR chmod (1)
+permission letters
+.BR X ,
+.BR u ,
+.BR g ,
+and
+.B o
+are not accepted.  A clause without a who letter applies to all
+users, as if
+.B a
+were given.
+.TP
+\fB\-\-reference\fR=\fIfile\fR
+Copy the mode of
+.I file
+rather than spelling it out with
+.BR \-m .
+The copied mode is subject to the umask, like a mode given with
+.BR \-m .
+Combine with
+.B \-A
+to copy the mode exactly.
+Mutually exclusive with
+.BR \-m .
+.TP
+\fB\-A\fR, \fB\-\-absolute\fR
+Apply the mode supplied with
+.B \-m
+(or the default mode) exactly, without clearing bits through the
+umask.  Only the file mode is affected.  Parent directories created
+with
+.B \-p
+remain subject to the umask.
+.TP
+\fB\-o\fR, \fB\-\-owner\fR=\fIowner\fR[:\fIgroup\fR]
+Set the file owner, and optionally the group, of each new file, using
+the ordering described above.  Any set-user-ID or set-group-ID bits
+requested with
+.B \-m
+survive, because the mode is applied after the ownership and
+.BR chown (2)
+clears them.
+.I owner
+and
+.I group
+may each be a name or a numeric ID.  A colon must be followed by a
+group, so
+.B \-o
+.I owner:
+is rejected rather than treated as
+.B \-o
+.IR owner .
+Changing ownership generally requires appropriate privileges.
+.TP
+\fB\-s\fR, \fB\-\-size\fR=\fIsize\fR
+Fill the new file with NUL bytes to the given
+.IR size .
+Suffixes
+.BR K ,
+.BR M ,
+and
+.B G
+are supported, using powers of 1024.
+Use
+.B \-\-sparse
+to create a sparse file instead of writing NUL bytes.
+.TP
+.B \-\-sparse
+With
+.BR \-\-size ,
+create a sparse file rather than filling it with NUL bytes.
+Unwritten regions consume no disk blocks on filesystems that support
+sparse files.
+Without
+.BR \-\-size ,
+this option has no effect and a warning is printed.
+.TP
+\fB\-\-template\fR=\fIfile\fR
+Copy the contents of
+.I file
+into each new file.  The resulting size is the size of the template.
+If
+.I file
+is
+.BR \- ,
+the content is read from standard input.  When several files are
+given, the input is read once and written to every one.
+Mutually exclusive with
+.BR \-s .
+.TP
+\fB\-p\fR, \fB\-\-parents\fR
+Create any missing parent directories along the target path, similar
+to
+.BR "mkdir \-p" .
+New directories receive mode
+.B 0777
+subject to the umask.
+.TP
+\fB\-f\fR, \fB\-\-force\fR
+Replace
+.I file
+if it already exists.  The replacement is built beside the target and
+moved onto it with
+.BR rename (2),
+so a reader gets either the old file or the new one.  The replacement
+is flushed with
+.BR fsync (2)
+before the rename and its directory after, so a crash during the
+operation also leaves one file or the other.  It carries the requested
+attributes exactly as a new file would.  If
+.B \-m
+is not given its mode is set to the default
+.BR a=rw .
+.IP
+Because the replacement is a different file, the path takes a new
+inode.  Other hard links to the old file go on naming the old content,
+and where
+.I file
+is a symbolic link it is the link that is replaced rather than its
+target.  Replacing also needs write permission on the directory holding
+.IR file ,
+which rewriting in place would not.
+.TP
+\fB\-\-backup\fR[\fB=\fIcontrol\fR]
+Before replacing with
+.BR \-f ,
+give the existing file a second name.  Without
+.BR \-f ,
+this option has no effect and a warning is printed.
+The backup is a hard link, so it holds the original inode and
+.I file
+itself never stops existing.  A backup already present under the
+chosen name is replaced.
+Only a regular file is backed up.
+.B newfile
+reports an error for a directory or symbolic link rather than
+linking it.
+.IP
+.I control
+selects the backup scheme:
+.RS
+.TP
+.B none\fR (alias \fBoff\fR)
+Make no backup, even when
+.B \-\-backup
+is given.
+.TP
+.B numbered\fR (alias \fBt\fR)
+Append
+\fB.~\fIn\fR\fB~\fR,
+choosing the next available number.
+.TP
+.B existing\fR (alias \fBnil\fR)
+Use numbered when a numbered backup already exists, otherwise simple.
+.TP
+.B simple\fR (alias \fBnever\fR)
+Append
+.B ~
+to the file name.
+.RE
+.IP
+If
+.I control
+is omitted, the value of the
+.B VERSION_CONTROL
+environment variable is consulted.  If that is also unset,
+.B existing
+is used.
+.TP
+.B \-b
+Equivalent to
+.B \-\-backup
+with no
+.I control
+argument.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Print a short message for each file as it is created.  The message
+names the backup when one is made.
+.TP
+\fB\-\-help\fR
+Display a summary of options and exit.
+.TP
+\fB\-\-version\fR
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+All files were processed successfully.
+.TP
+.B 1
+An error occurred for one or more files, or an unknown option was
+supplied.  A per-file failure does not stop processing of the remaining
+operands.
+.IP
+Exceeding the process file size limit is reported as an ordinary
+per-file error rather than terminating the run.
+.IP
+One error is reported after the file is already in place: a failed
+directory flush under
+.BR \-f .
+The replacement is complete and correct, but the rename may not survive
+a crash.  A directory that cannot be opened for reading, and a
+filesystem that does not flush directories at all, are not errors.
+.SH ENVIRONMENT
+.TP
+.B VERSION_CONTROL
+When
+.B \-b
+or
+.B \-\-backup
+is given without an explicit
+.IR control ,
+this variable selects the backup scheme.  Its recognized values are
+the same as the
+.I control
+argument to
+.BR \-\-backup .
+If unset,
+.B existing
+is used.
+.TP
+.B COLUMNS
+Width in columns for the
+.B \-\-help
+output.  A value below 40 or above 1000, or one that is not a decimal
+number, is ignored and 80 is used.  A word too long for the remaining
+space is left to overrun rather than broken.
+.SH EXAMPLES
+Create an executable shell script:
+.PP
+.RS
+.nf
+newfile \-m 0755 script.sh
+.fi
+.RE
+.PP
+Apply exact symbolic permissions, ignoring the umask:
+.PP
+.RS
+.nf
+newfile \-A \-m u=rw,g=r,o=r config.txt
+.fi
+.RE
+.PP
+Drop a private key into a directory that may not yet exist:
+.PP
+.RS
+.nf
+newfile \-p \-m 0600 \-o www\-data:www\-data /var/www/secrets/app.key
+.fi
+.RE
+.PP
+Allocate a 10 MiB sparse file (no disk blocks consumed):
+.PP
+.RS
+.nf
+newfile \-m 0600 \-s 10M \-\-sparse /tmp/swapfile
+.fi
+.RE
+.PP
+Copy the mode of an existing file onto a new one:
+.PP
+.RS
+.nf
+newfile \-\-reference=existing.conf new.conf
+.fi
+.RE
+.PP
+Seed a new file from a template:
+.PP
+.RS
+.nf
+newfile \-\-template=skeleton.conf \-m 0600 app.conf
+.fi
+.RE
+.PP
+Replace a file while keeping a numbered backup of the previous
+version:
+.PP
+.RS
+.nf
+newfile \-f \-\-backup=numbered \-m 0644 config.txt
+.fi
+.RE
+.SH SEE ALSO
+.BR chmod (1),
+.BR chown (1),
+.BR cp (1),
+.BR install (1),
+.BR touch (1),
+.BR truncate (1),
+.BR open (2),
+.BR link (2),
+.BR rename (2),
+.BR fsync (2),
+.BR umask (2)
+.SH AUTHOR
+Written by Arka Mondal.
+.SH REPORTING BUGS
+Report bugs at <https://github.com/arixsnow/newfile/issues>.
+.SH COPYRIGHT
+Copyright \(co 2026 Arka Mondal.
+.br
+Released under the BSD 3-Clause License.  The full notice is in the
+\%LICENSE file shipped with this program.
