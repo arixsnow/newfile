@@ -5,16 +5,21 @@
 # Portable makefile: explicit rules only, no conditionals, no pattern
 # rules.  Any POSIX-conforming make reads it.
 
-.POSIX:
-
 NAME    = newfile
-VERSION = 0.1.0
+VERSION = 0.1.1
 
-CC       = cc
-CFLAGS   = -std=c99 -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=3 \
-           -fstack-protector-strong -fPIE
-CPPFLAGS = -DVERSION=\"$(VERSION)\"
-LDFLAGS  = -pie -Wl,-z,relro,-z,now
+BASE_CFLAGS  = -std=c99 -fPIE
+BASE_LDFLAGS = -pie
+
+CC       ?= cc
+CFLAGS   ?= -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=3 \
+            -fstack-protector-strong
+CPPFLAGS ?=
+LDFLAGS  ?= -Wl,-z,relro,-z,now
+
+ALL_CFLAGS   = $(BASE_CFLAGS) $(CFLAGS)
+ALL_CPPFLAGS = -DVERSION=\"$(VERSION)\" $(CPPFLAGS)
+ALL_LDFLAGS  = $(BASE_LDFLAGS) $(LDFLAGS)
 
 PREFIX  = /usr/local
 BINDIR  = $(PREFIX)/bin
@@ -36,37 +41,37 @@ DISTDIR   = $(NAME)-$(VERSION)
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS)
+	$(CC) $(ALL_LDFLAGS) -o $@ $(OBJS)
 
 .SUFFIXES:
 
 $(BUILDDIR)/main.o: src/main.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/main.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/main.c
 
 $(BUILDDIR)/error.o: src/error.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/error.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/error.c
 
 $(BUILDDIR)/parse.o: src/parse.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/parse.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/parse.c
 
 $(BUILDDIR)/fileops.o: src/fileops.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/fileops.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/fileops.c
 
 $(BUILDDIR)/fastio.o: src/fastio.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/fastio.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/fastio.c
 
 $(BUILDDIR)/options.o: src/options.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/options.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/options.c
 
 $(BUILDDIR)/optparse.o: src/optparse.c $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ src/optparse.c
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/optparse.c
 
 check: $(BIN)
 	NEWFILE=$(BIN) sh tests/run_tests.sh
@@ -74,8 +79,7 @@ check: $(BIN)
 # Builds with the platform fast paths left out.  Exercises the read and
 # write path every other system takes.
 check-portable:
-	$(MAKE) BUILDDIR=build-portable \
-	    CPPFLAGS='-DVERSION=\"$(VERSION)\" -DNEWFILE_NO_FASTIO' all
+	$(MAKE) BUILDDIR=build-portable CPPFLAGS=-DNEWFILE_NO_FASTIO all
 	NEWFILE=build-portable/$(NAME) sh tests/run_tests.sh
 
 # Renamed into place: replacing a running binary cannot fail with
@@ -84,14 +88,17 @@ install: $(BIN)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	mkdir -p $(DESTDIR)$(MANDIR)/man1
 	cp $(BIN) $(DESTDIR)$(BINDIR)/$(NAME).new
+	touch -r $(BIN) $(DESTDIR)$(BINDIR)/$(NAME).new
 	chmod 755 $(DESTDIR)$(BINDIR)/$(NAME).new
 	mv $(DESTDIR)$(BINDIR)/$(NAME).new $(DESTDIR)$(BINDIR)/$(NAME)
 	cp doc/$(NAME).1 $(DESTDIR)$(MANDIR)/man1/$(NAME).1.new
+	touch -r doc/$(NAME).1 $(DESTDIR)$(MANDIR)/man1/$(NAME).1.new
 	chmod 644 $(DESTDIR)$(MANDIR)/man1/$(NAME).1.new
 	mv $(DESTDIR)$(MANDIR)/man1/$(NAME).1.new \
 	   $(DESTDIR)$(MANDIR)/man1/$(NAME).1
 	mkdir -p $(DESTDIR)$(LICDIR)
 	cp LICENSE $(DESTDIR)$(LICDIR)/LICENSE.new
+	touch -r LICENSE $(DESTDIR)$(LICDIR)/LICENSE.new
 	chmod 644 $(DESTDIR)$(LICDIR)/LICENSE.new
 	mv $(DESTDIR)$(LICDIR)/LICENSE.new $(DESTDIR)$(LICDIR)/LICENSE
 

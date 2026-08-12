@@ -1,3 +1,22 @@
+2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
+
+	Version 0.1.1.
+
+	* Makefile: Drop .POSIX:.  It predefines CC and CFLAGS, so the ?=
+	assignments below never took effect.
+	(CC, CFLAGS, CPPFLAGS, LDFLAGS): Assign with ?=, deferring to the
+	environment and the command line.
+	(BASE_CFLAGS, BASE_LDFLAGS): New macros.  Carry -std=c99 and the
+	-fPIE/-pie pair, which must not be overridden independently.
+	(ALL_CFLAGS, ALL_CPPFLAGS, ALL_LDFLAGS): New macros.  Concatenate
+	the base macros with the caller's flags, caller last.
+	(install): Set destination timestamps from the source with
+	touch -r.
+	(check-portable): Drop -DVERSION from CPPFLAGS, now in
+	ALL_CPPFLAGS.
+	* doc/newfile.1: Update the version string.
+	* README.md: Document flag precedence.
+
 2026-08-11  Arka Mondal  <arkamondalofficial@gmail.com>
 
 	Version 0.1.0.

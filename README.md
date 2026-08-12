@@ -52,18 +52,24 @@ when staging into a package root:
 make install PREFIX=/usr DESTDIR=/tmp/pkg
 ```
 
-The compiler and flags are overridable the usual way:
+`CC`, `CFLAGS`, `CPPFLAGS` and `LDFLAGS` are taken from the environment or the
+command line:
 
 ```sh
-make CC=clang CFLAGS='-std=c99 -O2 -Wall -Wextra -g'
+make CC=clang CFLAGS='-O0 -g'
 ```
 
-The default build is hardened with `_FORTIFY_SOURCE=3`, a stack protector, PIE
-and full RELRO. Clear both variables for a compiler that rejects those flags:
+A value for `CFLAGS` replaces the default `-O2 -Wall -Wextra -Werror
+-D_FORTIFY_SOURCE=3 -fstack-protector-strong`. A value for `LDFLAGS` replaces
+`-Wl,-z,relro,-z,now`.
 
-```sh
-make CFLAGS='-std=c99 -O2 -Wall -Wextra' LDFLAGS=''
-```
+`BASE_CFLAGS` and `BASE_LDFLAGS` are prepended to those. They hold `-std=c99`
+and the `-fPIE`/`-pie` pair, which must stay together because `-pie` without
+`-fPIE` fails to link. `-DVERSION` is prepended to `CPPFLAGS` the same way, so
+setting `CPPFLAGS` does not drop the version string. A compiler that rejects
+any of these needs `BASE_CFLAGS` or `BASE_LDFLAGS` overridden too.
+
+`-Werror` applies to a plain `make` only. Setting `CFLAGS` drops it.
 
 `make check` runs the shell test suite in `tests/`, covering option parsing,
 mode and size handling, atomic replacement, survival of a failed write, backups
