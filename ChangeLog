@@ -1,5 +1,15 @@
 2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
 
+	Version 0.1.2.
+
+	* src/error.c, src/fastio.c, src/fileops.c, src/main.c,
+	src/newfile.h, src/options.c, src/optparse.c, src/optparse.h,
+	src/parse.c, Makefile, tests/run_tests.sh: Add an SPDX license
+	identifier ahead of the copyright notice.
+	* doc/newfile.1: Update the version string.
+
+2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
+
 	Version 0.1.1.
 
 	* Makefile: Drop .POSIX:.  It predefines CC and CFLAGS, so the ?=

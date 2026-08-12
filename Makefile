@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Arka Mondal. All rights reserved.
 # Use of this source code is governed by a BSD-style license that
 # can be found in the LICENSE file.
@@ -6,7 +7,7 @@
 # rules.  Any POSIX-conforming make reads it.
 
 NAME    = newfile
-VERSION = 0.1.1
+VERSION = 0.1.2
 
 BASE_CFLAGS  = -std=c99 -fPIE
 BASE_LDFLAGS = -pie
