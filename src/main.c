@@ -561,7 +561,6 @@ static void display_version(void)
     printf("newfile %s\n", VERSION);
     puts("Copyright (c) 2026 Arka Mondal.");
     puts("License: BSD-3-Clause.");
-    puts("Written by Arka Mondal.");
 }
 
 /*

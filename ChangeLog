@@ -1,5 +1,16 @@
 2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
 
+	Version 0.1.3.
+
+	* src/main.c (display_version): Drop the author line.  The
+	copyright line above it already names the author.
+	* src/newfile.h (VERSION): Fall back to "unknown" rather than a
+	version number.  The fallback applies only where -DVERSION is
+	absent, and there the version is not known.
+	* doc/newfile.1: Update the version string.
+
+2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
+
 	Version 0.1.2.
 
 	* src/error.c, src/fastio.c, src/fileops.c, src/main.c,

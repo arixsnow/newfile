@@ -24,7 +24,7 @@
 #include <sys/types.h>
 
 #ifndef VERSION
-#define VERSION "0.1.0"
+#define VERSION "unknown"
 #endif
 
 #define BUG_URL "https://github.com/arixsnow/newfile/issues"

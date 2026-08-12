@@ -7,7 +7,7 @@
 # rules.  Any POSIX-conforming make reads it.
 
 NAME    = newfile
-VERSION = 0.1.2
+VERSION = 0.1.3
 
 BASE_CFLAGS  = -std=c99 -fPIE
 BASE_LDFLAGS = -pie
