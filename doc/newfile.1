@@ -1,7 +1,7 @@
 .\" Copyright (c) 2026, Arka Mondal. All rights reserved.
 .\" Use of this source code is governed by a BSD-style license that
 .\" can be found in the LICENSE file.
-.TH NEWFILE 1 "August 2026" "newfile 0.1.3" "User Commands"
+.TH NEWFILE 1 "August 2026" "newfile 0.2.0" "User Commands"
 .SH NAME
 newfile \- create files with specified attributes
 .SH SYNOPSIS
@@ -135,29 +135,50 @@ are supported, using powers of 1024.
 Use
 .B \-\-sparse
 to create a sparse file instead of writing NUL bytes.
+.IP
+With
+.BR \-\-template ,
+the size applies to the copy.  A
+.I size
+below the template's truncates it.  Above it, the file grows by a
+sparse region if
+.B \-\-sparse
+is given or if the template itself ends inside one, and by NUL bytes
+otherwise.
 .TP
 .B \-\-sparse
-With
-.BR \-\-size ,
-create a sparse file rather than filling it with NUL bytes.
-Unwritten regions consume no disk blocks on filesystems that support
-sparse files.
-Without
-.BR \-\-size ,
-this option has no effect and a warning is printed.
+Produce the bytes that have no other source as a sparse region rather
+than as NUL bytes.  Such a region consumes no disk blocks on
+filesystems that support sparse files.  Only
+.B \-\-size
+produces such bytes, so without it this option has no effect and a
+warning is printed.
 .TP
 \fB\-\-template\fR=\fIfile\fR
 Copy the contents of
 .I file
-into each new file.  The resulting size is the size of the template.
+into each new file.  The resulting size is the size of the template
+unless
+.B \-s
+is given as well.
+Sparse regions of the template are reproduced as sparse regions, so
+the copy has the same layout as its source whatever filesystem either
+one is on, and however many files are named.
 If
 .I file
 is
 .BR \- ,
-the content is read from standard input.  When several files are
-given, the input is read once and written to every one.
-Mutually exclusive with
-.BR \-s .
+the content is read from standard input.
+.IP
+The template is opened once for the whole run, so a template that
+cannot be read is reported before any file is created.  A source that
+cannot be read a second time, such as a pipe, is held in memory when
+several files are named.
+.IP
+A layout is reproduced only from a source that can be addressed as a
+whole file.  Standard input is read from wherever it is positioned.  One
+that has already been read from is copied as a plain stream, so any
+unwritten regions left in it become NUL bytes.
 .TP
 \fB\-p\fR, \fB\-\-parents\fR
 Create any missing parent directories along the target path, similar

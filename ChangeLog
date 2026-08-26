@@ -1,3 +1,78 @@
+2026-08-25  Arka Mondal  <arkamondalofficial@gmail.com>
+
+	Version 0.2.0.
+
+	* src/holes.c: New file.
+	(hole_next_data): New function.  Reports the written extents of a
+	descriptor.
+	(hole_tail): New function.  Reports a file whose last byte lies in
+	an unwritten region.
+	* src/template.c: New file.  Holds what a new file starts out
+	with, taken out of fileops.c.
+	(tmpl_open): New function.  Settles the source once for the run.
+	A regular source with a usable size is copied extent by extent,
+	anything else is read straight through, or read into memory first
+	where several files need it.  The operand count reaches only that
+	second case.  Standard input takes the extent path only where
+	nothing has been read from it yet, since what is left of a partly
+	read one has no layout to reproduce.
+	(tmpl_apply, tmpl_tail_hole, tmpl_close): New functions.
+	(copy_extents): New function.  Copies the written extents of a
+	source to the same offsets, stopping where st_size stands in for
+	the content.
+	(copy_stream): New function.  Carries the former read and write
+	loop.
+	(write_at, io_bufsize, io_bufalloc): New functions.  io_bufsize
+	takes the larger of the two descriptors a copy moves between.
+	(IO_BUFSIZE_MIN, IO_BUFSIZE_MAX): New macros, replacing IO_BUFSIZE.
+	* src/fastio.c (fast_alloc): Take an offset as well as a length.
+	(fast_copy): Take both offsets and a length, and advance the
+	offsets by the amount transferred.  Move the source checks to the
+	caller.
+	* src/fileops.c (write_buf, read_all): Move to template.c and make
+	static.
+	(fill_file): Move to template.c as fill_range, taking an offset and
+	addressing the file rather than relying on its offset.
+	(sync_dir): Remove.  dirsync_stage, dirsync_flush, dirsync_dir and
+	dirsync_release replace it, one flush covering a run of renames
+	into one directory.
+	(dir_of): New function.
+	* src/main.c (apply_size): New function.  Truncates or extends to
+	the requested size.
+	(dirsync_error): New function.  Both reports of a failed directory
+	flush go through it.  A failure that comes before any directory is
+	open names the operand instead.
+	(create_one): Copy the template before applying the size.  Stage
+	the directory flush rather than performing one per operand.
+	(main): Open the template before the operand loop and close it
+	after.  A template that cannot be read ends the run before any file
+	is created.  Flush the staged directories after the loop, then
+	release the last of them.
+	(parse_options): Drop the rejection of --template with --size.
+	(struct file_spec): Drop stdin_buf, stdin_len and stdin_buffered.
+	Add tmpl in place of template_given.
+	* src/options.c (notes): Break the backup control values at the
+	entry boundary, in place of one entry spanning two literals.
+	* src/newfile.h: Update the declarations.
+	(ATTR_UNUSED): New macro.  Marks the parameters the fallback stubs
+	cannot use.
+	* Makefile (VERSION): 0.2.0.
+	(OBJS): Add holes.o and template.o.
+	(DISTFILES): Add bench.
+	* doc/newfile.1: Document the layout a template gives the copy, how
+	--size and --sparse act on it, that the template is opened once for
+	the run, and which sources a layout is reproduced from.
+	* tests/run_tests.sh: Assert the copy's layout under both builds, a
+	template read from a pipe, a template redirected from a file
+	keeping its layout whatever the operand count, a source with no
+	written extent at all, a piped source outgrowing the buffer several
+	files share, standard input resuming where it was left, and more
+	operands than one directory flush covers.  Drop the assertion that
+	--template and --size are rejected together.
+	* bench/run_bench.sh: New file.
+	* README.md: Describe the benchmark script and what the test suite
+	covers.
+
 2026-08-12  Arka Mondal  <arkamondalofficial@gmail.com>
 
 	Version 0.1.3.

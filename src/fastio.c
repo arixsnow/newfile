@@ -19,24 +19,23 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/resource.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #if defined(__linux__) && !defined(NEWFILE_NO_FASTIO)
 
 /*
- * fast_alloc - reserve size bytes for fd without writing them
+ * fast_alloc - reserve len bytes at off for fd without writing them
  *
  * Leaves the file offset alone.  Returns 0, 1 if the filesystem cannot,
  * -1 with errno set.
  */
-int fast_alloc(int fd, off_t size)
+int fast_alloc(int fd, off_t off, off_t len)
 {
     static bool limit_known;
     static rlim_t size_limit;
     struct rlimit rl;
 
-    if (size <= 0) {
+    if (len <= 0) {
         return 1;
     }
 
@@ -46,14 +45,14 @@ int fast_alloc(int fd, off_t size)
         limit_known = true;
     }
 
-    /* fallocate(2) may not enforce RLIMIT_FSIZE; check it here */
+    /* fallocate(2) may not enforce RLIMIT_FSIZE, so check it here */
     if (size_limit != RLIM_INFINITY
-        && (uintmax_t)size > (uintmax_t)size_limit) {
+        && (uintmax_t)off + (uintmax_t)len > (uintmax_t)size_limit) {
         errno = EFBIG;
         return -1;
     }
 
-    if (fallocate(fd, 0, 0, size) == 0) {
+    if (fallocate(fd, 0, off, len) == 0) {
         return 0;
     }
 
@@ -65,29 +64,20 @@ int fast_alloc(int fd, off_t size)
 }
 
 /*
- * fast_copy - copy src_fd to dst_fd inside the kernel
+ * fast_copy - copy len bytes between descriptors inside the kernel
  *
- * Stops at the size read below.  Returns 0, 1 if unusable, -1 with
- * errno set.
+ * Both offsets advance by the amount transferred.  Returns 0, 1 if
+ * unusable, -1 with errno set.
  */
-int fast_copy(int dst_fd, int src_fd)
+int fast_copy(int dst_fd, off_t *dst_off, int src_fd, off_t *src_off,
+              off_t len)
 {
-    struct stat st;
     ssize_t ncopied;
-    off_t limit;
 
-    /* st_size 0 may still have content (procfs); fall back */
-    if (fstat(src_fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
-        return 1;
-    }
-
-    limit = st.st_size;
-
-    while (limit > 0) {
-        ncopied = copy_file_range(src_fd, NULL, dst_fd, NULL,
-                                  (size_t)limit, 0);
+    while (len > 0) {
+        ncopied = copy_file_range(src_fd, src_off, dst_fd, dst_off,
+                                  (size_t)len, 0);
         if (ncopied < 0) {
-            /* Both fds advanced; the read loop resumes there. */
             if (errno == EXDEV || errno == EINVAL || errno == ENOSYS
                 || errno == EOPNOTSUPP || errno == EBADF
                 || errno == EPERM || errno == ETXTBSY) {
@@ -102,7 +92,7 @@ int fast_copy(int dst_fd, int src_fd)
             return 1;
         }
 
-        limit -= ncopied;
+        len -= ncopied;
     }
 
     return 0;
@@ -110,19 +100,16 @@ int fast_copy(int dst_fd, int src_fd)
 
 #else
 
-int fast_alloc(int fd, off_t size)
+int fast_alloc(ATTR_UNUSED int fd, ATTR_UNUSED off_t off,
+               ATTR_UNUSED off_t len)
 {
-    (void)fd;
-    (void)size;
-
     return 1;
 }
 
-int fast_copy(int dst_fd, int src_fd)
+int fast_copy(ATTR_UNUSED int dst_fd, ATTR_UNUSED off_t *dst_off,
+              ATTR_UNUSED int src_fd, ATTR_UNUSED off_t *src_off,
+              ATTR_UNUSED off_t len)
 {
-    (void)dst_fd;
-    (void)src_fd;
-
     return 1;
 }
 

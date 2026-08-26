@@ -32,7 +32,7 @@ struct option_def {
     bool in_synopsis;
 };
 
-/* The one place an option is written down.  Listed in help order; the
+/* The one place an option is written down.  Listed in help order.  The
  * synopsis sorts its own groups. */
 static const struct option_def options[] = {
     {'m', "mode", OPT_REQUIRED, "mode",
@@ -82,9 +82,8 @@ static const char *const notes[] = {
     "With -s, the file is filled with NUL bytes by default.",
     "Use --sparse to create a sparse (hole) file instead.",
     "",
-    "Backup control values: none (or off), numbered (or t), "
-    "existing (or nil),",
-    "simple (or never).",
+    "Backup control values: none (or off), numbered (or t),",
+    "existing (or nil), simple (or never).",
     "Default control value is $VERSION_CONTROL, or 'existing' if unset.",
     "",
     "By default, an existing file is never touched.  Use -f to replace it.",

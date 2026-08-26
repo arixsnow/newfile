@@ -33,9 +33,11 @@
 #define ATTR_NORETURN __attribute__((__noreturn__))
 #define ATTR_PRINTF(fmt, args) \
     __attribute__((__format__(__printf__, fmt, args)))
+#define ATTR_UNUSED __attribute__((__unused__))
 #else
 #define ATTR_NORETURN
 #define ATTR_PRINTF(fmt, args)
+#define ATTR_UNUSED
 #endif
 
 /* Long-only option values */
@@ -74,17 +76,42 @@ void pending_arm(const char *path);
 void pending_clear(void);
 void pending_discard(void);
 void pending_cleanup(void);
-int sync_dir(const char *path);
-int write_buf(int dst_fd, const char *buf, size_t len);
-int read_all(int src_fd, char **buf_out, size_t *len_out);
-int copy_fd(int dst_fd, int src_fd);
-int copy_template(int dst_fd, const char *template_path);
-int fill_file(int fd, off_t size);
+int dirsync_stage(const char *path);
+int dirsync_flush(void);
+const char *dirsync_dir(void);
+void dirsync_release(void);
 int make_backup(const char *filepath, const char *control,
                 char **backup_name_out);
 
+/*
+ * template.c - what a new file starts out holding
+ *
+ * The source is classified once, when it is opened, so the layout of a
+ * copy cannot depend on how many files are being created.
+ *
+ * Named tmpl rather than template: the full word is a keyword in C++,
+ * and a header a C++ parser cannot read trips tooling that guesses at
+ * the language.
+ */
+struct tmpl;
+struct tmpl *tmpl_open(const char *path, bool repeat);
+int tmpl_apply(const struct tmpl *tmpl, int dst_fd);
+bool tmpl_tail_hole(const struct tmpl *tmpl);
+void tmpl_close(struct tmpl *tmpl);
+int fill_range(int fd, off_t off, off_t len);
+
+/*
+ * holes.c - where a file's data sits, so a copy keeps its shape
+ *
+ * Both move the file offset, so callers address the file explicitly.
+ */
+int hole_next_data(int fd, off_t from, off_t size, off_t *start,
+                   off_t *end);
+bool hole_tail(int fd, off_t size);
+
 /* fastio.c - each returns 1 where the platform cannot do the work */
-int fast_alloc(int fd, off_t size);
-int fast_copy(int dst_fd, int src_fd);
+int fast_alloc(int fd, off_t off, off_t len);
+int fast_copy(int dst_fd, off_t *dst_off, int src_fd, off_t *src_off,
+              off_t len);
 
 #endif

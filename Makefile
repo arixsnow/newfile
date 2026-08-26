@@ -7,7 +7,7 @@
 # rules.  Any POSIX-conforming make reads it.
 
 NAME    = newfile
-VERSION = 0.1.3
+VERSION = 0.2.0
 
 BASE_CFLAGS  = -std=c99 -fPIE
 BASE_LDFLAGS = -pie
@@ -32,11 +32,11 @@ BUILDDIR = build
 BIN      = $(BUILDDIR)/$(NAME)
 
 OBJS = $(BUILDDIR)/main.o $(BUILDDIR)/error.o $(BUILDDIR)/parse.o \
-       $(BUILDDIR)/fileops.o $(BUILDDIR)/fastio.o $(BUILDDIR)/options.o \
-       $(BUILDDIR)/optparse.o
+       $(BUILDDIR)/fileops.o $(BUILDDIR)/template.o $(BUILDDIR)/fastio.o \
+       $(BUILDDIR)/holes.o $(BUILDDIR)/options.o $(BUILDDIR)/optparse.o
 HDRS = src/newfile.h src/optparse.h
 
-DISTFILES = Makefile LICENSE README.md ChangeLog src doc tests
+DISTFILES = Makefile LICENSE README.md ChangeLog src doc tests bench
 DISTDIR   = $(NAME)-$(VERSION)
 
 all: $(BIN)
@@ -62,9 +62,17 @@ $(BUILDDIR)/fileops.o: src/fileops.c $(HDRS)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/fileops.c
 
+$(BUILDDIR)/template.o: src/template.c $(HDRS)
+	mkdir -p $(BUILDDIR)
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/template.c
+
 $(BUILDDIR)/fastio.o: src/fastio.c $(HDRS)
 	mkdir -p $(BUILDDIR)
 	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/fastio.c
+
+$(BUILDDIR)/holes.o: src/holes.c $(HDRS)
+	mkdir -p $(BUILDDIR)
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) -c -o $@ src/holes.c
 
 $(BUILDDIR)/options.o: src/options.c $(HDRS)
 	mkdir -p $(BUILDDIR)

@@ -24,10 +24,9 @@ const char *program_name = "newfile";
  * first to avoid padding holes. */
 struct file_spec {
     off_t size;
+    const struct tmpl *tmpl;
     const char *template_file;
     const char *backup_control;
-    const char *stdin_buf;
-    size_t stdin_len;
     mode_t mode;
     mode_t effective_umask;
     mode_t creation_umask;
@@ -39,17 +38,17 @@ struct file_spec {
     bool parents_mode;
     bool sparse_mode;
     bool size_given;
-    bool template_given;
     bool backup_given;
     bool set_owner;
     bool set_uid;
     bool set_gid;
     bool umask_in_loop;
-    bool stdin_buffered;
 };
 
 static void parse_options(int argc, char **argv, struct file_spec *spec);
 static int create_one(const char *path, const struct file_spec *spec);
+static int apply_size(int fd, off_t target, bool sparse, bool tail_hole);
+static void dirsync_error(const char *fallback);
 static void display_version(void);
 static void cleanup_handler(int sig);
 static void setup_sighandlers(void);
@@ -57,12 +56,11 @@ static void setup_sighandlers(void);
 int main(int argc, char **argv)
 {
     struct file_spec spec;
+    struct tmpl *tmpl;
     bool error_occurred;
     bool exact_open;
     bool hoist_umask;
     const char *base;
-    char *stdin_buf;
-    size_t stdin_len;
     int nfiles;
 
     if (argc > 0 && argv[0] != NULL && argv[0][0] != '\0') {
@@ -75,20 +73,18 @@ int main(int argc, char **argv)
     setup_sighandlers();
 
     error_occurred = false;
-    stdin_buf = NULL;
-    stdin_len = 0;
+    tmpl = NULL;
     nfiles = argc - opt_ind;
 
-    /* Buffer: a pipe cannot be re-read for each operand */
-    if (spec.template_given && strcmp(spec.template_file, "-") == 0
-        && nfiles > 1) {
-        if (read_all(STDIN_FILENO, &stdin_buf, &stdin_len) != 0) {
-            errorexit("cannot read standard input: %s\n",
-                      strerror(errno));
+    /* An unreadable template is a fault in the request, not in an
+     * operand, so it ends the run before any file exists. */
+    if (spec.template_file != NULL) {
+        tmpl = tmpl_open(spec.template_file, nfiles > 1);
+        if (tmpl == NULL) {
+            errorexit("cannot read template '%s': %s\n",
+                      spec.template_file, strerror(errno));
         }
-        spec.stdin_buf = stdin_buf;
-        spec.stdin_len = stdin_len;
-        spec.stdin_buffered = true;
+        spec.tmpl = tmpl;
     }
 
     /* Read the umask without changing it */
@@ -111,11 +107,18 @@ int main(int argc, char **argv)
         }
     }
 
+    if (dirsync_flush() != 0) {
+        dirsync_error(".");
+        error_occurred = true;
+    }
+
+    dirsync_release();
+
     if (hoist_umask) {
         umask(spec.creation_umask);
     }
 
-    free(stdin_buf);
+    tmpl_close(tmpl);
 
     if (!stdout_ok()) {
         error_occurred = true;
@@ -156,22 +159,19 @@ static void parse_options(int argc, char **argv, struct file_spec *spec)
     spec->size = 0;
     spec->uid = 0;
     spec->gid = 0;
+    spec->tmpl = NULL;
     spec->template_file = NULL;
     spec->backup_control = NULL;
-    spec->stdin_buf = NULL;
-    spec->stdin_len = 0;
     spec->absolute_given = false;
     spec->force_mode = false;
     spec->parents_mode = false;
     spec->sparse_mode = false;
     spec->size_given = false;
-    spec->template_given = false;
     spec->backup_given = false;
     spec->set_owner = false;
     spec->set_uid = false;
     spec->set_gid = false;
     spec->umask_in_loop = false;
-    spec->stdin_buffered = false;
     spec->verbose = 0;
 
     while ((option = optparse_long(argc, argv, options_optstring(),
@@ -208,7 +208,6 @@ static void parse_options(int argc, char **argv, struct file_spec *spec)
             size_arg = opt_arg;
             break;
         case OPTVAL_TEMPLATE:
-            spec->template_given = true;
             spec->template_file = opt_arg;
             break;
         case OPTVAL_BACKUP:
@@ -258,11 +257,6 @@ static void parse_options(int argc, char **argv, struct file_spec *spec)
 
     if (mode_given && reference_given) {
         errorexit("options '--mode' and '--reference' are "
-                  "mutually exclusive\n");
-    }
-
-    if (spec->template_given && spec->size_given) {
-        errorexit("options '--template' and '--size' are "
                   "mutually exclusive\n");
     }
 
@@ -330,7 +324,7 @@ static void parse_options(int argc, char **argv, struct file_spec *spec)
 static int create_one(const char *path, const struct file_spec *spec)
 {
     bool file_failed;
-    int fd, template_ret, ret;
+    int fd, ret;
     int operand_errno;
     mode_t open_mode;
     uid_t uid_arg;
@@ -339,7 +333,7 @@ static int create_one(const char *path, const struct file_spec *spec)
     char *backup_name;
     size_t arglen;
 
-    /* An empty operand names nothing; a trailing slash names a
+    /* An empty operand names nothing.  A trailing slash names a
      * directory. */
     arglen = strlen(path);
     if (arglen == 0 || path[arglen - 1] == '/') {
@@ -408,37 +402,21 @@ static int create_one(const char *path, const struct file_spec *spec)
         pending_arm(path);
     }
 
-    if (spec->size_given) {
-        if (spec->sparse_mode) {
-            if (ftruncate(fd, spec->size) != 0) {
-                output_error("cannot set size of '%s': %s\n",
-                             path, strerror(errno));
-                ret = -1;
-                file_failed = true;
-                goto cleanup;
-            }
-        } else {
-            if (fill_file(fd, spec->size) != 0) {
-                output_error("cannot fill '%s': %s\n",
-                             path, strerror(errno));
-                ret = -1;
-                file_failed = true;
-                goto cleanup;
-            }
+    /* The template seeds the file, so --size acts on the result. */
+    if (spec->tmpl != NULL) {
+        if (tmpl_apply(spec->tmpl, fd) != 0) {
+            output_error("cannot copy template to '%s': %s\n",
+                         path, strerror(errno));
+            ret = -1;
+            file_failed = true;
+            goto cleanup;
         }
     }
 
-    if (spec->template_given) {
-        if (strcmp(spec->template_file, "-") != 0) {
-            template_ret = copy_template(fd, spec->template_file);
-        } else if (spec->stdin_buffered) {
-            template_ret = write_buf(fd, spec->stdin_buf,
-                                     spec->stdin_len);
-        } else {
-            template_ret = copy_fd(fd, STDIN_FILENO);
-        }
-        if (template_ret != 0) {
-            output_error("cannot copy template to '%s': %s\n",
+    if (spec->size_given) {
+        if (apply_size(fd, spec->size, spec->sparse_mode,
+                       tmpl_tail_hole(spec->tmpl)) != 0) {
+            output_error("cannot set size of '%s': %s\n",
                          path, strerror(errno));
             ret = -1;
             file_failed = true;
@@ -515,11 +493,8 @@ static int create_one(const char *path, const struct file_spec *spec)
 
         pending_clear();
 
-        /* Already renamed; only the flush failed */
-        if (sync_dir(path) != 0) {
-            output_error("replaced '%s' but could not flush its "
-                         "directory: %s\n",
-                         path, strerror(errno));
+        if (dirsync_stage(path) != 0) {
+            dirsync_error(path);
             ret = -1;
         }
     } else {
@@ -554,6 +529,43 @@ cleanup:
     free(backup_name);
 
     return ret;
+}
+
+/*
+ * apply_size - bring fd to target bytes
+ *
+ * A source that stopped in a gap is carried on with one.  Returns 0,
+ * or -1 with errno set.
+ */
+static int apply_size(int fd, off_t target, bool sparse, bool tail_hole)
+{
+    struct stat st;
+
+    if (fstat(fd, &st) != 0) {
+        return -1;
+    }
+
+    if (target <= st.st_size || sparse || tail_hole) {
+        return ftruncate(fd, target);
+    }
+
+    return fill_range(fd, st.st_size, target - st.st_size);
+}
+
+/* A staging failure may have no directory to name, so the operand
+ * stands in for one. */
+static void dirsync_error(const char *fallback)
+{
+    const char *dir;
+
+    dir = dirsync_dir();
+    if (dir != NULL) {
+        output_error("cannot flush directory '%s': %s\n",
+                     dir, strerror(errno));
+    } else {
+        output_error("cannot flush the directory holding '%s': %s\n",
+                     fallback, strerror(errno));
+    }
 }
 
 static void display_version(void)

@@ -329,10 +329,18 @@ echo "hello from template" > "$TESTDIR/tpl_src"
 "$NEWFILE" --template="$TESTDIR/tpl_src" -A -m 0600 "$TESTDIR/tpl_out" 2>/dev/null
 assert_eq "template content copied" "hello from template" "$(cat "$TESTDIR/tpl_out")"
 assert_eq "template mode applied" "600" "$(get_perms "$TESTDIR/tpl_out")"
-assert_exit "template + size mutually exclusive" 1 \
-    "$NEWFILE" --template="$TESTDIR/tpl_src" -s 1K "$TESTDIR/tpl_bad"
 assert_exit "template nonexistent exits 1" 1 \
     "$NEWFILE" --template="$TESTDIR/no_such_file" "$TESTDIR/tpl_bad2"
+
+dd if=/dev/urandom of="$TESTDIR/pipe_src" bs=1024 count=512 2>/dev/null
+dd if="$TESTDIR/pipe_src" bs=65536 2>/dev/null |
+    "$NEWFILE" --template=- "$TESTDIR/pipe_out" 2>/dev/null
+if cmp -s "$TESTDIR/pipe_src" "$TESTDIR/pipe_out"; then
+    result="yes"
+else
+    result="no"
+fi
+assert_eq "template from a pipe copies every byte" "yes" "$result"
 
 # Backup
 echo "--- backup ---"
@@ -495,6 +503,127 @@ OUT=$("$NEWFILE" --sparse "$TESTDIR/sparse_warn" 2>&1)
 if echo "$OUT" | grep -q "warning"; then result="yes"; else result="no"; fi
 assert_eq "--sparse without --size prints warning" "yes" "$result"
 
+# The shape a template gives the new file.  Every assertion here has to
+# hold under 'make check-portable' too, which is what proves the result
+# does not depend on who moved the bytes.
+echo "--- template shape ---"
+
+# 1 MiB of gap with data in the last block, and the reverse.
+"$NEWFILE" -s 1M --sparse "$TESTDIR/tpl_tail_data" 2>/dev/null
+dd if=/dev/urandom of="$TESTDIR/tpl_tail_data" bs=4096 seek=255 \
+    count=1 conv=notrunc 2>/dev/null
+"$NEWFILE" -s 1M --sparse "$TESTDIR/tpl_tail_gap" 2>/dev/null
+dd if=/dev/urandom of="$TESTDIR/tpl_tail_gap" bs=4096 seek=0 \
+    count=1 conv=notrunc 2>/dev/null
+dd if=/dev/urandom of="$TESTDIR/tpl_dense" bs=4096 count=256 2>/dev/null
+
+"$NEWFILE" --template="$TESTDIR/tpl_tail_data" "$TESTDIR/sh_sparse" \
+    2>/dev/null
+assert_eq "sparse template keeps its size" "1048576" \
+    "$(get_size "$TESTDIR/sh_sparse")"
+if cmp -s "$TESTDIR/tpl_tail_data" "$TESTDIR/sh_sparse"; then
+    result="yes"
+else
+    result="no"
+fi
+assert_eq "sparse template copies every byte" "yes" "$result"
+blocks=$(du -k "$TESTDIR/sh_sparse" | cut -f1)
+if [ "$blocks" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "sparse template stays sparse" "yes" "$result"
+
+# A source with no written extent at all.
+"$NEWFILE" -s 1M --sparse "$TESTDIR/tpl_all_gap" 2>/dev/null
+"$NEWFILE" --template="$TESTDIR/tpl_all_gap" "$TESTDIR/sh_all_gap" \
+    2>/dev/null
+assert_eq "template of nothing but gap keeps its size" "1048576" \
+    "$(get_size "$TESTDIR/sh_all_gap")"
+blocks=$(du -k "$TESTDIR/sh_all_gap" | cut -f1)
+if [ "$blocks" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "template of nothing but gap stays sparse" "yes" "$result"
+
+"$NEWFILE" --template="$TESTDIR/tpl_dense" "$TESTDIR/sh_dense" 2>/dev/null
+blocks=$(du -k "$TESTDIR/sh_dense" | cut -f1)
+if [ "$blocks" -ge 1024 ]; then result="yes"; else result="no"; fi
+assert_eq "dense template stays dense" "yes" "$result"
+
+"$NEWFILE" --template="$TESTDIR/tpl_tail_data" -s 512K \
+    "$TESTDIR/sh_trunc" 2>/dev/null
+assert_eq "--size below the template truncates" "524288" \
+    "$(get_size "$TESTDIR/sh_trunc")"
+
+"$NEWFILE" --template="$TESTDIR/tpl_tail_data" -s 2M \
+    "$TESTDIR/sh_grow_data" 2>/dev/null
+assert_eq "--size above a template ending in data" "2097152" \
+    "$(get_size "$TESTDIR/sh_grow_data")"
+blocks=$(du -k "$TESTDIR/sh_grow_data" | cut -f1)
+if [ "$blocks" -ge 1024 ]; then result="yes"; else result="no"; fi
+assert_eq "template ending in data grows dense" "yes" "$result"
+
+"$NEWFILE" --template="$TESTDIR/tpl_tail_gap" -s 2M \
+    "$TESTDIR/sh_grow_gap" 2>/dev/null
+assert_eq "--size above a template ending in a gap" "2097152" \
+    "$(get_size "$TESTDIR/sh_grow_gap")"
+blocks=$(du -k "$TESTDIR/sh_grow_gap" | cut -f1)
+if [ "$blocks" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "template ending in a gap grows sparse" "yes" "$result"
+
+"$NEWFILE" --template="$TESTDIR/tpl_tail_data" -s 2M --sparse \
+    "$TESTDIR/sh_grow_forced" 2>/dev/null
+blocks=$(du -k "$TESTDIR/sh_grow_forced" | cut -f1)
+if [ "$blocks" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "--sparse overrides a template ending in data" "yes" "$result"
+
+# The same source arriving on standard input.  A redirected file can be
+# read again, so the number of operands must not reach the layout.
+"$NEWFILE" --template=- "$TESTDIR/sh_in_one" \
+    < "$TESTDIR/tpl_tail_data" 2>/dev/null
+"$NEWFILE" --template=- "$TESTDIR/sh_in_a" "$TESTDIR/sh_in_b" \
+    "$TESTDIR/sh_in_c" < "$TESTDIR/tpl_tail_data" 2>/dev/null
+assert_eq "stdin template keeps its size for one file" "1048576" \
+    "$(get_size "$TESTDIR/sh_in_one")"
+assert_eq "stdin template keeps its size for several" "1048576" \
+    "$(get_size "$TESTDIR/sh_in_c")"
+if cmp -s "$TESTDIR/tpl_tail_data" "$TESTDIR/sh_in_a" \
+   && cmp -s "$TESTDIR/tpl_tail_data" "$TESTDIR/sh_in_c"; then
+    result="yes"
+else
+    result="no"
+fi
+assert_eq "stdin template copies every byte to several files" "yes" \
+    "$result"
+blocks_one=$(du -k "$TESTDIR/sh_in_one" | cut -f1)
+blocks_many=$(du -k "$TESTDIR/sh_in_c" | cut -f1)
+if [ "$blocks_many" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "stdin template stays sparse for several files" "yes" "$result"
+assert_eq "stdin template layout ignores the operand count" \
+    "$blocks_one" "$blocks_many"
+
+# A source ending in a gap, extended through the same path.  Nothing
+# but the source decides that the growth is sparse.
+"$NEWFILE" --template=- -s 2M "$TESTDIR/sh_in_grow_a" \
+    "$TESTDIR/sh_in_grow_b" < "$TESTDIR/tpl_tail_gap" 2>/dev/null
+assert_eq "stdin template with --size above it" "2097152" \
+    "$(get_size "$TESTDIR/sh_in_grow_b")"
+blocks=$(du -k "$TESTDIR/sh_in_grow_b" | cut -f1)
+if [ "$blocks" -lt 512 ]; then result="yes"; else result="no"; fi
+assert_eq "stdin template ending in a gap grows sparse" "yes" "$result"
+
+# More operands than one directory flush covers.
+echo "--- batched directory flush ---"
+mkdir -p "$TESTDIR/batch"
+set --
+i=1
+while [ "$i" -le 200 ]; do
+    set -- "$@" "$TESTDIR/batch/f$i"
+    i=$((i + 1))
+done
+"$NEWFILE" -f -s 8 "$@" 2>/dev/null
+assert_eq "-f across 200 operands creates all of them" "200" \
+    "$(find "$TESTDIR/batch" -type f | wc -l | tr -d ' ')"
+assert_eq "-f across 200 operands sizes them" "8" \
+    "$(get_size "$TESTDIR/batch/f137")"
+set --
+
 # Mode edge cases
 echo "--- mode edge cases ---"
 "$NEWFILE" -A -m a+r "$TESTDIR/mode_ar" 2>/dev/null
@@ -584,8 +713,8 @@ assert_eq "--template=- third of many gets stdin" "shared" "$(cat "$TESTDIR/tpl_
 assert_eq "--template=- empty stdin first file empty" "0" "$(get_size "$TESTDIR/tpl_si_e1")"
 assert_eq "--template=- empty stdin second file empty" "0" "$(get_size "$TESTDIR/tpl_si_e2")"
 
-# 128 KiB, so buffering stdin for several files has to grow the buffer
-# past its initial size more than once.
+# 128 KiB redirected from a file, so the copy is larger than one
+# transfer and several files read it through the same descriptor.
 BIG_SRC="$TESTDIR/tpl_big_src"
 : > "$BIG_SRC"
 i=0
@@ -608,6 +737,38 @@ else
     result="no"
 fi
 assert_eq "oversized stdin content is identical in both" "yes" "$result"
+
+# Piped, so several files share one buffer that has to grow.  384 KiB
+# outgrows its initial capacity twice.
+PIPE_BIG="$TESTDIR/tpl_pipe_big"
+: > "$PIPE_BIG"
+i=0
+while [ "$i" -lt 48 ]; do
+    printf '%08192d' 0 >> "$PIPE_BIG"
+    i=$((i + 1))
+done
+assert_eq "piped template source is 384 KiB" "393216" \
+    "$(get_size "$PIPE_BIG")"
+dd if="$PIPE_BIG" bs=65536 2>/dev/null |
+    "$NEWFILE" --template=- "$TESTDIR/tpl_pipe_a" \
+        "$TESTDIR/tpl_pipe_b" 2>/dev/null
+if cmp -s "$PIPE_BIG" "$TESTDIR/tpl_pipe_a" \
+   && cmp -s "$PIPE_BIG" "$TESTDIR/tpl_pipe_b"; then
+    result="yes"
+else
+    result="no"
+fi
+assert_eq "piped template outgrowing the buffer reaches every file" \
+    "yes" "$result"
+
+# Bytes already taken from standard input stay taken.
+printf 'apple\nbanana\ncherry\n' > "$TESTDIR/tpl_read_src"
+{ read -r _
+  "$NEWFILE" --template=- "$TESTDIR/tpl_read_out" 2>/dev/null
+} < "$TESTDIR/tpl_read_src"
+assert_eq "--template=- resumes where standard input was left" \
+    "banana cherry" \
+    "$(tr '\n' ' ' < "$TESTDIR/tpl_read_out" | sed 's/ $//')"
 
 # Parent directory edge cases
 echo "--- parents edge cases ---"

@@ -5,25 +5,30 @@
  * can be found in the LICENSE file.
  */
 
-/* fileops.c - file-system operations for newfile */
+/* fileops.c - paths, atomic replacement and backups */
 
 #include "newfile.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define IO_BUFSIZE 65536
+/* Renames sharing one directory flush */
+#define DIRSYNC_BATCH 64
 
 static int find_next_backup_number(const char *filepath);
 static int ensure_directory(const char *path);
 
 /* Created but not committed.  Borrowed, never freed here */
 static const char *volatile pending_path;
+
+/* Renames waiting for the flush that makes them survive a crash */
+static int dirsync_fd = -1;
+static char *dirsync_name;
+static int dirsync_pending;
 
 /* dir_prefix_len - length of the directory part, with its slash */
 static size_t dir_prefix_len(const char *path)
@@ -104,16 +109,11 @@ void pending_cleanup(void)
     }
 }
 
-/*
- * sync_dir - fsync the directory holding path
- *
- * Makes a rename into it survive a crash.  Returns 0, or -1.
- */
-int sync_dir(const char *path)
+/* dir_of - the directory part of path, as a string to free */
+static char *dir_of(const char *path)
 {
     char *dir;
     size_t dirlen;
-    int fd, ret, saved_errno;
 
     dirlen = dir_prefix_len(path);
 
@@ -124,7 +124,7 @@ int sync_dir(const char *path)
 
     dir = malloc(dirlen + 2);
     if (dir == NULL) {
-        return -1;
+        return NULL;
     }
 
     if (dirlen == 0) {
@@ -135,30 +135,104 @@ int sync_dir(const char *path)
     }
     dir[dirlen] = '\0';
 
-    fd = open(dir, O_RDONLY);
-    free(dir);
-    if (fd == -1) {
-        if (errno == EACCES || errno == EPERM) {
-            return 0;
-        }
-        return -1;
+    return dir;
+}
+
+/*
+ * dirsync_flush - flush the renames noted since the last flush
+ *
+ * The batch is cleared either way.  Returns 0, or -1 with errno set.
+ */
+int dirsync_flush(void)
+{
+    int ret;
+
+    /* Nothing is staged unless the descriptor is open. */
+    if (dirsync_pending == 0) {
+        return 0;
     }
 
-    ret = fsync(fd);
+    ret = fsync(dirsync_fd);
+    dirsync_pending = 0;
 
     /* Not every filesystem can flush a directory. */
     if (ret != 0 && (errno == EINVAL || errno == ENOTSUP)) {
         ret = 0;
     }
 
-    saved_errno = errno;
-    if (close(fd) != 0 && ret == 0) {
-        ret = -1;
-        saved_errno = errno;
-    }
-    errno = saved_errno;
-
     return ret;
+}
+
+/*
+ * dirsync_stage - note a rename into the directory holding path
+ *
+ * One flush covers a run of renames into the same directory.  It runs
+ * when the run ends or the batch fills.  Returns 0, or -1 with errno
+ * set.
+ */
+int dirsync_stage(const char *path)
+{
+    char *dir;
+    int fd, saved_errno;
+
+    dir = dir_of(path);
+    if (dir == NULL) {
+        return -1;
+    }
+
+    if (dirsync_name != NULL && strcmp(dirsync_name, dir) != 0) {
+        if (dirsync_flush() != 0) {
+            saved_errno = errno;
+            free(dir);
+            errno = saved_errno;
+            return -1;
+        }
+        close(dirsync_fd);
+        dirsync_fd = -1;
+        free(dirsync_name);
+        dirsync_name = NULL;
+    }
+
+    if (dirsync_fd == -1) {
+        fd = open(dir, O_RDONLY);
+        if (fd == -1) {
+            saved_errno = errno;
+            free(dir);
+            errno = saved_errno;
+            /* Nothing to flush through a directory we cannot open */
+            return (saved_errno == EACCES || saved_errno == EPERM)
+                   ? 0 : -1;
+        }
+        dirsync_fd = fd;
+        dirsync_name = dir;
+    } else {
+        free(dir);
+    }
+
+    dirsync_pending++;
+    if (dirsync_pending >= DIRSYNC_BATCH) {
+        return dirsync_flush();
+    }
+
+    return 0;
+}
+
+/* dirsync_dir - the directory a failed flush was covering, or NULL */
+const char *dirsync_dir(void)
+{
+    return dirsync_name;
+}
+
+/* Runs after the last flush has been reported, so the name outlives it. */
+void dirsync_release(void)
+{
+    if (dirsync_fd != -1) {
+        close(dirsync_fd);
+        dirsync_fd = -1;
+    }
+
+    free(dirsync_name);
+    dirsync_name = NULL;
 }
 
 /*
@@ -220,193 +294,6 @@ int make_parents(const char *path)
             errno = saved_errno;
             return -1;
         }
-    }
-
-    free(buf);
-    return 0;
-}
-
-/* write_buf - write len bytes from buf to dst_fd, retrying short
- * writes.  Returns 0, or -1. */
-int write_buf(int dst_fd, const char *buf, size_t len)
-{
-    ssize_t nwritten;
-    size_t off;
-
-    off = 0;
-    while (off < len) {
-        nwritten = write(dst_fd, buf + off, len - off);
-        if (nwritten == -1) {
-            return -1;
-        }
-        if (nwritten == 0) {
-            errno = EIO;
-            return -1;
-        }
-        off += (size_t)nwritten;
-    }
-
-    return 0;
-}
-
-/*
- * read_all - read src_fd to EOF into one heap buffer
- *
- * *buf_out is the caller's to free and is never NULL on success.
- * src_fd stays open.  Returns 0, or -1.
- */
-int read_all(int src_fd, char **buf_out, size_t *len_out)
-{
-    char *buf, *newbuf;
-    size_t cap, len;
-    ssize_t nread;
-    int saved_errno;
-
-    cap = IO_BUFSIZE;
-    len = 0;
-    buf = malloc(cap);
-    if (buf == NULL) {
-        return -1;
-    }
-
-    while ((nread = read(src_fd, buf + len, cap - len)) > 0) {
-        len += (size_t)nread;
-        if (len == cap) {
-            if (cap > SIZE_MAX / 2) {
-                free(buf);
-                errno = ENOMEM;
-                return -1;
-            }
-            cap *= 2;
-            newbuf = realloc(buf, cap);
-            if (newbuf == NULL) {
-                saved_errno = errno;
-                free(buf);
-                errno = saved_errno;
-                return -1;
-            }
-            buf = newbuf;
-        }
-    }
-
-    if (nread == -1) {
-        saved_errno = errno;
-        free(buf);
-        errno = saved_errno;
-        return -1;
-    }
-
-    *buf_out = buf;
-    *len_out = len;
-    return 0;
-}
-
-/*
- * copy_fd - copy src_fd to dst_fd, buffering if fast_copy() declines
- *
- * src_fd is read to EOF and left open.  Returns 0, or -1.
- */
-int copy_fd(int dst_fd, int src_fd)
-{
-    char *buf;
-    ssize_t nread;
-    int ret, saved_errno;
-
-    ret = fast_copy(dst_fd, src_fd);
-    if (ret <= 0) {
-        return ret;
-    }
-
-    buf = malloc(IO_BUFSIZE);
-    if (buf == NULL) {
-        return -1;
-    }
-
-    while ((nread = read(src_fd, buf, IO_BUFSIZE)) > 0) {
-        if (write_buf(dst_fd, buf, (size_t)nread) != 0) {
-            saved_errno = errno;
-            free(buf);
-            errno = saved_errno;
-            return -1;
-        }
-    }
-
-    if (nread == -1) {
-        saved_errno = errno;
-        free(buf);
-        errno = saved_errno;
-        return -1;
-    }
-
-    free(buf);
-    return 0;
-}
-
-/* copy_template - copy template_path into dst_fd.  Returns 0, or -1. */
-int copy_template(int dst_fd, const char *template_path)
-{
-    int src_fd, saved_errno;
-
-    src_fd = open(template_path, O_RDONLY);
-    if (src_fd == -1) {
-        return -1;
-    }
-
-    if (copy_fd(dst_fd, src_fd) != 0) {
-        saved_errno = errno;
-        close(src_fd);
-        errno = saved_errno;
-        return -1;
-    }
-
-    if (close(src_fd) != 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-/*
- * fill_file - give fd a size of size bytes reading as NUL
- *
- * Reserves the space if fast_alloc() can, otherwise writes it.  The
- * resulting file offset is unspecified.  Returns 0, or -1.
- */
-int fill_file(int fd, off_t size)
-{
-    char *buf;
-    off_t remaining;
-    size_t chunk;
-    ssize_t nwritten;
-    int ret, saved_errno;
-
-    ret = fast_alloc(fd, size);
-    if (ret <= 0) {
-        return ret;
-    }
-
-    buf = calloc(IO_BUFSIZE, 1);
-    if (buf == NULL) {
-        return -1;
-    }
-
-    remaining = size;
-    while (remaining > 0) {
-        chunk = (remaining > IO_BUFSIZE)
-                ? IO_BUFSIZE : (size_t)remaining;
-        nwritten = write(fd, buf, chunk);
-        if (nwritten == -1) {
-            saved_errno = errno;
-            free(buf);
-            errno = saved_errno;
-            return -1;
-        }
-        if (nwritten == 0) {
-            free(buf);
-            errno = EIO;
-            return -1;
-        }
-        remaining -= nwritten;
     }
 
     free(buf);
@@ -536,7 +423,7 @@ int make_backup(const char *filepath, const char *control,
         }
     }
 
-    /* link(2) fails on an existing name; unlink first */
+    /* link(2) fails on an existing name, so unlink first */
     if (link(filepath, backup_name) != 0) {
         if (errno != EEXIST
             || unlink(backup_name) != 0

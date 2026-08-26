@@ -72,10 +72,17 @@ any of these needs `BASE_CFLAGS` or `BASE_LDFLAGS` overridden too.
 `-Werror` applies to a plain `make` only. Setting `CFLAGS` drops it.
 
 `make check` runs the shell test suite in `tests/`, covering option parsing,
-mode and size handling, atomic replacement, survival of a failed write, backups
-and per-file error behaviour. `make check-portable` runs the same suite against
-a build with the platform-specific fast paths compiled out. `make dist` packs
-the source into a `.tar.xz`.
+mode and size handling, the layout a template gives the copy, atomic
+replacement, survival of a failed write, backups and per-file error behaviour.
+`make check-portable` runs the same suite against a build with the
+platform-specific fast paths compiled out, so the two runs together show that
+the result does not depend on which path the copy took. `make dist` packs the
+source into a `.tar.xz`.
+
+`bench/run_bench.sh` times the copy and creation paths, and compares two
+binaries when `NEWFILE_OLD` and `NEWFILE_NEW` are both set. Set `BENCHDIR` to
+choose the filesystem measured. The default may put it in memory rather than on
+a disk.
 
 ## Documentation
 
