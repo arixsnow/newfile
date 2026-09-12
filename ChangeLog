@@ -1,3 +1,9 @@
+2026-09-12  Arka Mondal  <arka@arkamondal.net>
+
+	* README.md: Drop the build and test detail the Makefile and
+	bench/run_bench.sh already carry.  Add an Installing section for
+	the PPA and Copr archives.
+
 2026-08-25  Arka Mondal  <arkamondalofficial@gmail.com>
 
 	Version 0.2.0.
