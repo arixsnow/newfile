@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+# release.yml - the release check on every shipped target
+
+name: release check
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fedora-44
+          - fedora-45
+          - fedora-rawhide
+          - ubuntu-26.04
+          - ubuntu-26.10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sudo sh tests/ci/run.sh release ${{ matrix.target }}

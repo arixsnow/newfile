@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+# dev.yml - the development checks on Fedora 44
+
+name: dev
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.job }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { job: style, timeout: 50 }
+          - { job: test gcc, timeout: 75 }
+          - { job: test clang, timeout: 75 }
+          - { job: sanitize, timeout: 75 }
+          - { job: faults, timeout: 130 }
+          - { job: fs, timeout: 360 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sudo sh tests/ci/run.sh dev ${{ matrix.job }}

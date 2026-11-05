@@ -7,8 +7,8 @@
 
 /* optparse.h - declarations for the command-line option parser */
 
-#ifndef OPTPARSE_H
-#define OPTPARSE_H
+#ifndef NEWFILE_OPTPARSE_H
+#define NEWFILE_OPTPARSE_H
 
 enum {
     OPT_NONE,
@@ -18,8 +18,8 @@ enum {
 
 struct opt_option {
     const char *name;
-    int has_arg;
     int *flag;
+    int has_arg;
     int val;
 };
 

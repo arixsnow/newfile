@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+# Containerfile.ubuntu - the Ubuntu image the release checks run in
+
+ARG RELEASE=26.04
+FROM docker.io/library/ubuntu:${RELEASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN echo 'path-include=/usr/share/doc/libfuse3-dev/examples/*' \
+        >/etc/dpkg/dpkg.cfg.d/newfile-examples \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc libc6-dev make dpkg-dev pkgconf \
+        sed grep findutils diffutils coreutils util-linux \
+        procps iproute2 kmod acl strace file udev \
+        e2fsprogs xfsprogs btrfs-progs f2fs-tools \
+        fuse3 libfuse3-dev fuse-overlayfs bindfs \
+        nfs-kernel-server nfs-common \
+        virtme-ng qemu-system-x86 busybox-static zstd \
+        linux-image-virtual catatonit \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cd /usr/share/doc/libfuse3-dev/examples \
+    && gcc -O2 -o /usr/local/bin/passthrough_ll passthrough_ll.c \
+        $(pkg-config --cflags --libs fuse3)
+
+RUN useradd -m tester
+
+ENTRYPOINT ["/usr/bin/catatonit", "-g", "--"]

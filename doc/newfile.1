@@ -1,7 +1,7 @@
 .\" Copyright (c) 2026, Arka Mondal. All rights reserved.
 .\" Use of this source code is governed by a BSD-style license that
 .\" can be found in the LICENSE file.
-.TH NEWFILE 1 "August 2026" "newfile 0.2.0" "User Commands"
+.TH NEWFILE 1 "November 2026" "newfile 0.3.0" "User Commands"
 .SH NAME
 newfile \- create files with specified attributes
 .SH SYNOPSIS
@@ -20,22 +20,45 @@ creates each
 with the mode, ownership, size and initial content given on the command
 line, in a single invocation.
 .PP
-Each
+No
 .I file
-is opened with owner read and write only, filled, given its owner, then
-given the requested mode, so it is never readable under the wrong
-ownership.  A file that cannot be completed is not created: if any step
-fails, or the run is interrupted by a signal, the partial file is
-removed.
+has a name until it is finished.  Each is filled, then given its owner,
+and its mode goes on last, because writing and
+.BR chown (2)
+both clear the set-user-ID and set-group-ID bits.  Any content is
+flushed with
+.BR fsync (2)
+before the file is named, so a reader finds either nothing or the
+finished file.  A file that fails at any step never appears, and an
+interrupted run leaves each file either as it was or finished.  Where
+the system cannot create a file without a name, or
+.B \-o
+gives the file to another user, it is built under a temporary name
+starting with
+.B .newfile.\&
+in the same directory.  It stays at mode 0600 until its content and
+owner are final, and only a crash or
+.B SIGKILL
+can leave it behind.  A temporary name the filesystem refuses to remove
+is reported as an error.
+.PP
+Once the file is named,
+.B newfile
+flushes it again, along with every directory that gained a name.  An
+exit status of 0 means each
+.I file
+will survive a crash or power loss, to the extent that the system's
+.BR fsync (2)
+writes through to the storage device.
 .PP
 By default an existing
 .I file
-is not replaced.  The underlying
-.BR open (2)
-call uses
-.BR O_EXCL ,
-so the existence check and the creation are atomic: if two processes
-race to create the same path, only one succeeds.  Pass
+is not replaced.  The name is given by a call that fails if the name is
+taken, so if two processes race to create the same path, only one
+succeeds.  When the filesystem has no such call and the file cannot be
+hard-linked either, an empty file with mode 0600 takes the name first,
+and the finished file then replaces it.  A reader can see that empty
+file for a moment.  Pass
 .B \-f
 to replace an existing file.  The replacement is committed with
 .BR rename (2),
@@ -52,10 +75,11 @@ front of it.
 If
 .B \-m
 is not given, the mode defaults to
-.BR a=rw ,
-subject to the process umask.  Pass
+.BR a=rw .
+The process umask applies to it, or the directory's default ACL where
+it has one, as for any new file.  Pass
 .B \-A
-to apply the requested bits exactly, ignoring the umask.
+to apply the requested bits exactly.
 .PP
 Long options must be spelled in full.  Options may appear before or
 after the file operands.
@@ -97,8 +121,8 @@ Mutually exclusive with
 \fB\-A\fR, \fB\-\-absolute\fR
 Apply the mode supplied with
 .B \-m
-(or the default mode) exactly, without clearing bits through the
-umask.  Only the file mode is affected.  Parent directories created
+(or the default mode) exactly, with no bits cleared by the umask or a
+default ACL.  Only the file mode is affected.  Parent directories created
 with
 .B \-p
 remain subject to the umask.
@@ -161,9 +185,11 @@ into each new file.  The resulting size is the size of the template
 unless
 .B \-s
 is given as well.
-Sparse regions of the template are reproduced as sparse regions, so
-the copy has the same layout as its source whatever filesystem either
-one is on, and however many files are named.
+Sparse regions of the template are reproduced as sparse regions,
+however many files are named.  Where the template's filesystem cannot
+report its gaps, blocks of zeros become gaps instead.  On a filesystem
+that reports no gaps where it has some, the copy keeps them only where
+the kernel's own copy does.
 If
 .I file
 is
@@ -171,12 +197,13 @@ is
 the content is read from standard input.
 .IP
 The template is opened once for the whole run, so a template that
-cannot be read is reported before any file is created.  A source that
-cannot be read a second time, such as a pipe, is held in memory when
-several files are named.
+cannot be read, or is a directory, is reported before any file is
+created.  A source that cannot be read a second time, such as a pipe,
+is first copied to an anonymous file when several files are named.
 .IP
 A layout is reproduced only from a source that can be addressed as a
-whole file.  Standard input is read from wherever it is positioned.  One
+whole file.  Standard input is read from wherever it is positioned, and
+is left just past what was copied.  One
 that has already been read from is copied as a plain stream, so any
 unwritten regions left in it become NUL bytes.
 .TP
@@ -194,12 +221,8 @@ Replace
 if it already exists.  The replacement is built beside the target and
 moved onto it with
 .BR rename (2),
-so a reader gets either the old file or the new one.  The replacement
-is flushed with
-.BR fsync (2)
-before the rename and its directory after, so a crash during the
-operation also leaves one file or the other.  It carries the requested
-attributes exactly as a new file would.  If
+so a reader, or a crash, finds either the old file or the new one.  It
+carries the requested attributes exactly as a new file would.  If
 .B \-m
 is not given its mode is set to the default
 .BR a=rw .
@@ -219,14 +242,31 @@ Before replacing with
 give the existing file a second name.  Without
 .BR \-f ,
 this option has no effect and a warning is printed.
-The backup is a hard link, so it holds the original inode and
+The backup is a hard link made before
 .I file
-itself never stops existing.  A backup already present under the
-chosen name is replaced.
+is replaced, so it holds the original inode and
+.I file
+itself never stops existing.  If the backup cannot be made, nothing is
+replaced.  A backup already present under the chosen name is replaced.
+A crash cannot lose the old file.  At worst it leaves the old file with
+an extra name starting with
+.BR .newfile. ,
+which takes no extra space.  If the directory cannot be flushed, that
+name is kept, and a warning names it.  If another process puts a file
+at the path while
+.B newfile
+is replacing it, a filesystem that can exchange two names leaves that
+file under the extra name instead of the old one.  It is kept and
+reported as an error.  On other filesystems the final rename replaces
+it, as any rename would.
+Where old files take such names, a signal that arrives after the first
+of them, such as an interrupt from the terminal, takes effect only once
+the rest of its group of up to 64 files has been named and flushed, and
+the extra names removed.
 Only a regular file is backed up.
 .B newfile
 reports an error for a directory or symbolic link rather than
-linking it.
+backing it up.
 .IP
 .I control
 selects the backup scheme:
@@ -240,7 +280,9 @@ is given.
 .B numbered\fR (alias \fBt\fR)
 Append
 \fB.~\fIn\fR\fB~\fR,
-choosing the next available number.
+where
+.I n
+is one more than the highest number already in use.
 .TP
 .B existing\fR (alias \fBnil\fR)
 Use numbered when a numbered backup already exists, otherwise simple.
@@ -279,21 +321,33 @@ Print version information and exit.
 .TP
 .B 0
 All files were processed successfully.
+.IP
+A file in
+.B TMPDIR
+that cannot be removed once it is open is only a warning, and leaves the
+status at 0.
 .TP
 .B 1
 An error occurred for one or more files, or an unknown option was
 supplied.  A per-file failure does not stop processing of the remaining
 operands.
 .IP
+A write error on standard output or standard error also gives 1, once
+every file has been processed.
+.IP
 Exceeding the process file size limit is reported as an ordinary
 per-file error rather than terminating the run.
 .IP
-One error is reported after the file is already in place: a failed
-directory flush under
-.BR \-f .
-The replacement is complete and correct, but the rename may not survive
-a crash.  A directory that cannot be opened for reading, and a
-filesystem that does not flush directories at all, are not errors.
+Three errors are reported after the file is already in place.  After a
+flush that fails once the file has its name, the name may not survive a
+crash.  A
+.BR close (2)
+that fails is reported as well.  A temporary name starting with
+.B .newfile.\&
+that the filesystem refuses to remove is left in the file's directory.
+In each case the file itself is complete and correct.  A directory that
+cannot be opened for reading, and a filesystem that does not flush
+directories at all, are not errors.
 .SH ENVIRONMENT
 .TP
 .B VERSION_CONTROL
@@ -311,6 +365,13 @@ argument to
 If unset,
 .B existing
 is used.
+.TP
+.B TMPDIR
+Directory for the anonymous file that holds a piped template, on systems
+where it cannot be kept in memory.  If unset,
+.B /tmp
+is used.  The file is removed as soon as it is open, and a warning names
+one that cannot be.
 .TP
 .B COLUMNS
 Width in columns for the

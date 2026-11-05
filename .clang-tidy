@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+---
+Checks: >-
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -readability-implicit-bool-conversion,
+  -readability-identifier-length,
+  -readability-isolate-declaration,
+  -bugprone-easily-swappable-parameters,
+  -concurrency-mt-unsafe
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/.*\.h$'
+CheckOptions:
+  cert-err33-c.AllowCastToVoid: false
+  cert-err33-c.CheckedFunctions: '^::aligned_alloc$;^::asctime_s$;^::at_quick_exit$;^::atexit$;^::bsearch$;^::bsearch_s$;^::btowc$;^::c16rtomb$;^::c32rtomb$;^::calloc$;^::clock$;^::cnd_broadcast$;^::cnd_init$;^::cnd_signal$;^::cnd_timedwait$;^::cnd_wait$;^::ctime_s$;^::fclose$;^::fgetc$;^::fgetpos$;^::fgets$;^::fgetwc$;^::fopen$;^::fopen_s$;^::fprintf_s$;^::fputwc$;^::fputws$;^::fread$;^::freopen$;^::freopen_s$;^::fscanf$;^::fscanf_s$;^::fseek$;^::fsetpos$;^::ftell$;^::fwprintf$;^::fwprintf_s$;^::fwscanf$;^::fwscanf_s$;^::getc$;^::getchar$;^::getenv$;^::getenv_s$;^::gets_s$;^::getwc$;^::getwchar$;^::gmtime$;^::gmtime_s$;^::localtime$;^::localtime_s$;^::malloc$;^::mbrtoc16$;^::mbrtoc32$;^::mbsrtowcs$;^::mbsrtowcs_s$;^::mbstowcs$;^::mbstowcs_s$;^::memchr$;^::mktime$;^::mtx_init$;^::mtx_lock$;^::mtx_timedlock$;^::mtx_trylock$;^::mtx_unlock$;^::printf_s$;^::putc$;^::putwc$;^::raise$;^::realloc$;^::remove$;^::rename$;^::scanf$;^::scanf_s$;^::setlocale$;^::setvbuf$;^::signal$;^::snprintf$;^::snprintf_s$;^::sprintf$;^::sprintf_s$;^::sscanf$;^::sscanf_s$;^::strchr$;^::strerror_s$;^::strftime$;^::strpbrk$;^::strrchr$;^::strstr$;^::strtod$;^::strtof$;^::strtoimax$;^::strtok$;^::strtok_s$;^::strtol$;^::strtold$;^::strtoll$;^::strtoul$;^::strtoull$;^::strtoumax$;^::strxfrm$;^::swprintf$;^::swprintf_s$;^::swscanf$;^::swscanf_s$;^::thrd_create$;^::thrd_detach$;^::thrd_join$;^::thrd_sleep$;^::time$;^::timespec_get$;^::tmpfile$;^::tmpfile_s$;^::tmpnam$;^::tmpnam_s$;^::tss_create$;^::tss_get$;^::tss_set$;^::ungetc$;^::ungetwc$;^::vfprintf_s$;^::vfscanf$;^::vfscanf_s$;^::vfwprintf$;^::vfwprintf_s$;^::vfwscanf$;^::vfwscanf_s$;^::vprintf_s$;^::vscanf$;^::vscanf_s$;^::vsnprintf$;^::vsnprintf_s$;^::vsprintf$;^::vsprintf_s$;^::vsscanf$;^::vsscanf_s$;^::vswprintf$;^::vswprintf_s$;^::vswscanf$;^::vswscanf_s$;^::vwprintf_s$;^::vwscanf$;^::vwscanf_s$;^::wcrtomb$;^::wcschr$;^::wcsftime$;^::wcspbrk$;^::wcsrchr$;^::wcsrtombs$;^::wcsrtombs_s$;^::wcsstr$;^::wcstod$;^::wcstof$;^::wcstoimax$;^::wcstok$;^::wcstok_s$;^::wcstol$;^::wcstold$;^::wcstoll$;^::wcstombs$;^::wcstombs_s$;^::wcstoul$;^::wcstoull$;^::wcstoumax$;^::wcsxfrm$;^::wctob$;^::wctrans$;^::wctype$;^::wmemchr$;^::wprintf_s$;^::wscanf$;^::wscanf_s$'
+  bugprone-reserved-identifier.AllowedIdentifiers: '_GNU_SOURCE;_XOPEN_SOURCE;_FILE_OFFSET_BITS'
+  cert-dcl37-c.AllowedIdentifiers: '_GNU_SOURCE;_XOPEN_SOURCE;_FILE_OFFSET_BITS'
+  cert-dcl51-cpp.AllowedIdentifiers: '_GNU_SOURCE;_XOPEN_SOURCE;_FILE_OFFSET_BITS'
+  readability-magic-numbers.IgnoredIntegerValues: '1;2;3;4;8;10'
+  misc-include-cleaner.MissingIncludes: false
+  misc-include-cleaner.IgnoreHeaders: 'newfile\.h;signal\.h;bits/.*;asm/.*;asm-generic/.*;linux/.*'
+...

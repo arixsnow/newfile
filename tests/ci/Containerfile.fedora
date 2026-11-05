@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+# Containerfile.fedora - the Fedora image the checks run in
+
+ARG RELEASE=44
+FROM registry.fedoraproject.org/fedora:${RELEASE}
+
+RUN dnf -y install --setopt=install_weak_deps=False \
+        gcc clang compiler-rt libasan libubsan make \
+        gawk sed grep findutils diffutils coreutils util-linux cpio \
+        procps-ng iproute kmod acl strace file systemd-udev \
+        e2fsprogs xfsprogs btrfs-progs f2fs-tools \
+        fuse3 fuse3-devel fuse-overlayfs bindfs pkgconf-pkg-config \
+        nfs-utils nfsv4-client-utils \
+        virtme-ng qemu-system-x86-core busybox \
+        clang-tools-extra cppcheck ShellCheck groff \
+        redhat-rpm-config rpm-build catatonit \
+    && dnf -y install --setopt=install_weak_deps=False \
+        --setopt=tsflags=noscripts kernel-core \
+    && depmod -a "$(ls /usr/lib/modules)" \
+    && dnf clean all
+
+RUN mkdir /tmp/fuse && cd /tmp/fuse \
+    && dnf download --source fuse3 \
+    && rpm -K fuse3-*.src.rpm \
+    && rpm2cpio fuse3-*.src.rpm | cpio -id './fuse-*.tar.gz' \
+    && tar -xzf fuse-*.tar.gz --strip-components=2 \
+        --wildcards '*/example/passthrough_ll.c' \
+        '*/example/passthrough_helpers.h' \
+    && gcc -O2 -o /usr/local/bin/passthrough_ll passthrough_ll.c \
+        $(pkg-config --cflags --libs fuse3) \
+    && cd / && rm -rf /tmp/fuse && dnf clean all
+
+RUN useradd -m tester
+
+ENTRYPOINT ["/usr/libexec/catatonit/catatonit", "-g", "--"]

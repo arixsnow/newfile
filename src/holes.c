@@ -7,32 +7,37 @@
 
 /* holes.c - where a file's data sits, so a copy keeps its shape */
 
-/*
- * Must precede newfile.h, which pulls in system headers of its own.
- * Not conditional on NEWFILE_NO_FASTIO: the shape of a copy cannot
- * depend on who performed it.
- */
-#ifdef __linux__
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#endif
 
 #include "newfile.h"
+#include "holes.h"
 #include <errno.h>
+#include <stdbool.h>
 #include <unistd.h>
 
-#if defined(SEEK_DATA) && defined(SEEK_HOLE)
+static off_t seek_data(int fd, off_t from);
 
-/*
- * hole_next_data - the first written extent at or after from
- *
- * A descriptor that cannot report its layout reports everything left as
- * written.  Returns 1 with *start and *end set, 0 past the last extent,
- * or -1 with errno set.
- */
-int hole_next_data(int fd, off_t from, off_t size, off_t *start,
-                   off_t *end)
+#ifdef NEWFILE_NO_SEEKHOLE
+
+static off_t seek_data(ATTR_UNUSED int fd, ATTR_UNUSED off_t from)
+{
+    errno = EINVAL;
+    return -1;
+}
+
+#else
+
+static off_t seek_data(int fd, off_t from)
+{
+    return lseek(fd, from, SEEK_DATA);
+}
+
+#endif
+
+/* Returns 1 with *start and *end set, 0 past the last extent, or -1. */
+int hole_next_data(int fd, off_t from, off_t size, off_t *start, off_t *end)
 {
     off_t data, gap;
 
@@ -40,7 +45,7 @@ int hole_next_data(int fd, off_t from, off_t size, off_t *start,
         return 0;
     }
 
-    data = lseek(fd, from, SEEK_DATA);
+    data = seek_data(fd, from);
     if (data == -1) {
         if (errno == ENXIO) {
             return 0;
@@ -66,38 +71,20 @@ int hole_next_data(int fd, off_t from, off_t size, off_t *start,
     return 1;
 }
 
-/* hole_tail - true when the last byte of the file lies in a gap */
 bool hole_tail(int fd, off_t size)
 {
     if (size <= 0) {
         return false;
     }
 
-    if (lseek(fd, size - 1, SEEK_DATA) == -1) {
+    if (seek_data(fd, size - 1) == -1) {
         return errno == ENXIO;
     }
 
     return false;
 }
 
-#else
-
-int hole_next_data(ATTR_UNUSED int fd, off_t from, off_t size,
-                   off_t *start, off_t *end)
+bool hole_unknown(int fd)
 {
-    if (from >= size) {
-        return 0;
-    }
-
-    *start = from;
-    *end = size;
-
-    return 1;
+    return seek_data(fd, 0) == -1 && (errno == EINVAL || errno == ENOTSUP);
 }
-
-bool hole_tail(ATTR_UNUSED int fd, ATTR_UNUSED off_t size)
-{
-    return false;
-}
-
-#endif

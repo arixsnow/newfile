@@ -49,11 +49,12 @@ sudo dnf copr enable arixsnow/newfile
 sudo dnf install newfile
 ```
 
-Anywhere else, build from source.
+Packages are built for x86_64 only: Ubuntu 26.04 and 26.10, and Fedora 44, 45
+and rawhide. On other Linux distributions, build from source.
 
 ## Building
 
-You need a C99 compiler and any POSIX-conforming `make`.
+You need Linux, a C99 compiler and any POSIX-conforming `make`.
 
 ```sh
 make
@@ -76,6 +77,18 @@ it.
 
 `make check` runs the test suite. `make dist` packs the source into a
 `.tar.xz`.
+
+The same checks also run in containers, which need only podman and `/dev/fuse`
+on the host:
+
+```sh
+sh tests/ci/run.sh dev all
+sh tests/ci/run.sh release all
+```
+
+The first runs every development check on Fedora 44. The second builds and
+tests newfile on each distribution it ships to, with that distribution's
+package build flags. The filesystem checks in both also need `/dev/kvm`.
 
 ## Documentation
 

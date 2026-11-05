@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Arka Mondal. All rights reserved.
+# Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
+
+---
+BasedOnStyle: LLVM
+Language: C
+UseTab: Never
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 80
+LineEnding: LF
+InsertNewlineAtEOF: true
+InsertBraces: true
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: true
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeWhile: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+
+AlignAfterOpenBracket: true
+AlignOperands: Align
+AlignEscapedNewlines: DontAlign
+AlignTrailingComments:
+  Kind: Always
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+PenaltyBreakAssignment: 100
+BinPackArguments: true
+BinPackParameters: BinPack
+Cpp11BracedListStyle: AlignFirstComment
+PointerAlignment: Right
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCompound: false
+  AlignFunctionDeclarations: true
+  AlignFunctionPointers: false
+  PadOperators: true
+SpaceBeforeParens: ControlStatements
+IndentCaseLabels: false
+IndentPPDirectives: None
+IndentGotoLabels: false
+MaxEmptyLinesToKeep: 1
+SpacesBeforeTrailingComments: 1
+
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+ReflowComments: Never
+SortIncludes:
+  Enabled: false
+IncludeBlocks: Preserve
+...

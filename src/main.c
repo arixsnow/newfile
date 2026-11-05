@@ -8,613 +8,78 @@
 /* main.c - create file(s) with specified attributes */
 
 #include "newfile.h"
-#include "optparse.h"
+#include "batch.h"
+#include "error.h"
+#include "pending.h"
+#include "spec.h"
+#include "template.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
-const char *program_name = "newfile";
-
-/* Command-line settings, shared by every operand.  Widest members
- * first to avoid padding holes. */
-struct file_spec {
-    off_t size;
-    const struct tmpl *tmpl;
-    const char *template_file;
-    const char *backup_control;
-    mode_t mode;
-    mode_t effective_umask;
-    mode_t creation_umask;
-    uid_t uid;
-    gid_t gid;
-    int verbose;
-    bool absolute_given;
-    bool force_mode;
-    bool parents_mode;
-    bool sparse_mode;
-    bool size_given;
-    bool backup_given;
-    bool set_owner;
-    bool set_uid;
-    bool set_gid;
-    bool umask_in_loop;
-};
-
-static void parse_options(int argc, char **argv, struct file_spec *spec);
-static int create_one(const char *path, const struct file_spec *spec);
-static int apply_size(int fd, off_t target, bool sparse, bool tail_hole);
-static void dirsync_error(const char *fallback);
-static void display_version(void);
-static void cleanup_handler(int sig);
-static void setup_sighandlers(void);
+static void reserve_std_fds(void);
 
 int main(int argc, char **argv)
 {
     struct file_spec spec;
     struct tmpl *tmpl;
-    bool error_occurred;
-    bool exact_open;
-    bool hoist_umask;
     const char *base;
-    int nfiles;
+    bool ok;
+    int first;
+
+    reserve_std_fds();
 
     if (argc > 0 && argv[0] != NULL && argv[0][0] != '\0') {
         base = strrchr(argv[0], '/');
         program_name = (base != NULL) ? base + 1 : argv[0];
     }
 
-    parse_options(argc, argv, &spec);
+    first = spec_parse(argc, argv, &spec);
 
-    setup_sighandlers();
+    pending_install();
 
-    error_occurred = false;
     tmpl = NULL;
-    nfiles = argc - opt_ind;
-
-    /* An unreadable template is a fault in the request, not in an
-     * operand, so it ends the run before any file exists. */
     if (spec.template_file != NULL) {
-        tmpl = tmpl_open(spec.template_file, nfiles > 1);
+        tmpl = tmpl_open(spec.template_file, argc - first > 1);
         if (tmpl == NULL) {
-            errorexit("cannot read template '%s': %s\n",
-                      spec.template_file, strerror(errno));
+            error_exit("cannot read template '%s': %s\n", spec.template_file,
+                       strerror(errno));
         }
         spec.tmpl = tmpl;
     }
 
-    /* Read the umask without changing it */
-    spec.creation_umask = umask(0);
-    umask(spec.creation_umask);
-    spec.effective_umask = spec.absolute_given ? 0 : spec.creation_umask;
-
-    exact_open = spec.set_owner || spec.absolute_given;
-    spec.umask_in_loop = exact_open && spec.parents_mode;
-    hoist_umask = exact_open && !spec.parents_mode && !spec.force_mode;
-
-    /* -p directories must keep the umask, hence the exclusion above. */
-    if (hoist_umask) {
-        umask(0);
-    }
-
-    for (; opt_ind < argc; opt_ind++) {
-        if (create_one(argv[opt_ind], &spec) != 0) {
-            error_occurred = true;
-        }
-    }
-
-    if (dirsync_flush() != 0) {
-        dirsync_error(".");
-        error_occurred = true;
-    }
-
-    dirsync_release();
-
-    if (hoist_umask) {
-        umask(spec.creation_umask);
-    }
+    ok = batch_run(argv + first, (size_t)(argc - first), &spec);
 
     tmpl_close(tmpl);
 
-    if (!stdout_ok()) {
-        error_occurred = true;
+    if (!error_close_std()) {
+        ok = false;
     }
 
-    return error_occurred ? EXIT_FAILURE : EXIT_SUCCESS;
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-/*
- * parse_options - fill spec from argv and validate the combination
- *
- * Exits on a bad option.  opt_ind indexes the first operand on return.
- */
-static void parse_options(int argc, char **argv, struct file_spec *spec)
+static void reserve_std_fds(void)
 {
-    bool mode_given;      /* -m/--mode */
-    bool owner_given;     /* -o/--owner */
-    bool reference_given; /* --reference */
-    int opt_index, option;
-    const char *reference_file;
-    const char *mode_arg;
-    const char *owner_arg;
-    const char *size_arg;
-    struct stat ref_st;
+    int fd, nfd;
 
-    mode_given = false;
-    owner_given = false;
-    reference_given = false;
-    opt_index = 0;
-    reference_file = NULL;
-    mode_arg = NULL;
-    owner_arg = NULL;
-    size_arg = NULL;
+    for (fd = STDOUT_FILENO; fd <= STDERR_FILENO; fd++) {
+        if (fcntl(fd, F_GETFD) != -1 || errno != EBADF) {
+            continue;
+        }
 
-    spec->mode = 0;
-    spec->effective_umask = 0;
-    spec->creation_umask = 0;
-    spec->size = 0;
-    spec->uid = 0;
-    spec->gid = 0;
-    spec->tmpl = NULL;
-    spec->template_file = NULL;
-    spec->backup_control = NULL;
-    spec->absolute_given = false;
-    spec->force_mode = false;
-    spec->parents_mode = false;
-    spec->sparse_mode = false;
-    spec->size_given = false;
-    spec->backup_given = false;
-    spec->set_owner = false;
-    spec->set_uid = false;
-    spec->set_gid = false;
-    spec->umask_in_loop = false;
-    spec->verbose = 0;
-
-    while ((option = optparse_long(argc, argv, options_optstring(),
-                                   options_long(), &opt_index)) != -1) {
-        switch (option) {
-        case OPTVAL_HELP:
-            options_usage(EXIT_SUCCESS);
-        case OPTVAL_VERSION:
-            display_version();
-            exit(stdout_ok() ? EXIT_SUCCESS : EXIT_FAILURE);
-        case 'm':
-            mode_given = true;
-            mode_arg = opt_arg;
-            break;
-        case 'A':
-            spec->absolute_given = true;
-            break;
-        case 'p':
-            spec->parents_mode = true;
-            break;
-        case 'f':
-            spec->force_mode = true;
-            break;
-        case 'o':
-            owner_given = true;
-            owner_arg = opt_arg;
-            break;
-        case OPTVAL_REFERENCE:
-            reference_given = true;
-            reference_file = opt_arg;
-            break;
-        case 's':
-            spec->size_given = true;
-            size_arg = opt_arg;
-            break;
-        case OPTVAL_TEMPLATE:
-            spec->template_file = opt_arg;
-            break;
-        case OPTVAL_BACKUP:
-            spec->backup_given = true;
-            if (opt_arg != NULL) {
-                spec->backup_control = opt_arg;
+        nfd = open("/dev/null", O_RDONLY);
+        if (nfd == -1) {
+            exit(EXIT_FAILURE);
+        }
+        if (nfd != fd) {
+            if (dup2(nfd, fd) == -1) {
+                exit(EXIT_FAILURE);
             }
-            break;
-        case 'b':
-            spec->backup_given = true;
-            break;
-        case OPTVAL_SPARSE:
-            spec->sparse_mode = true;
-            break;
-        case 'v':
-            spec->verbose = 1;
-            break;
-        case ':':
-            if (opt_name != NULL) {
-                output_error("option '--%s' requires an argument\n",
-                             opt_name);
-            } else {
-                output_error("option requires an argument -- %c\n",
-                             opt_opt);
-            }
-            options_usage(EXIT_FAILURE);
-        case '=':
-            output_error("option '--%s' does not take an argument\n",
-                         opt_name);
-            options_usage(EXIT_FAILURE);
-        case '?':
-            if (opt_name != NULL) {
-                output_error("unknown option '%s'\n", opt_name);
-            } else {
-                output_error("unknown option -- %c\n", opt_opt);
-            }
-            options_usage(EXIT_FAILURE);
-        default:
-            options_usage(EXIT_FAILURE);
-        }
-    }
-
-    if (opt_ind == argc) {
-        output_error("missing operand\n");
-        options_usage(EXIT_FAILURE);
-    }
-
-    if (mode_given && reference_given) {
-        errorexit("options '--mode' and '--reference' are "
-                  "mutually exclusive\n");
-    }
-
-    if (spec->backup_given && !spec->force_mode) {
-        output_error("warning: backup option has no effect"
-                     " without --force\n");
-    }
-
-    if (spec->sparse_mode && !spec->size_given) {
-        output_error("warning: --sparse has no effect"
-                     " without --size\n");
-    }
-
-    if (spec->backup_given && spec->force_mode) {
-        if (spec->backup_control == NULL) {
-            spec->backup_control = getenv("VERSION_CONTROL");
-            if (spec->backup_control == NULL) {
-                spec->backup_control = "existing";
-            }
-        }
-        if (strcmp(spec->backup_control, "simple") != 0
-            && strcmp(spec->backup_control, "never") != 0
-            && strcmp(spec->backup_control, "none") != 0
-            && strcmp(spec->backup_control, "off") != 0
-            && strcmp(spec->backup_control, "numbered") != 0
-            && strcmp(spec->backup_control, "t") != 0
-            && strcmp(spec->backup_control, "existing") != 0
-            && strcmp(spec->backup_control, "nil") != 0) {
-            errorexit("invalid backup control '%s'\n",
-                      spec->backup_control);
-        }
-    }
-
-    if (reference_given) {
-        if (stat(reference_file, &ref_st) != 0) {
-            errorexit("cannot stat reference file '%s': %s\n",
-                      reference_file, strerror(errno));
-        }
-        spec->mode = ref_st.st_mode & 07777;
-    } else if (mode_given) {
-        spec->mode = parse_mode(mode_arg);
-    } else {
-        spec->mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP
-                     | S_IROTH | S_IWOTH;
-    }
-
-    if (owner_given
-        && parse_owner(owner_arg, &spec->uid, &spec->gid,
-                       &spec->set_uid, &spec->set_gid) != 0) {
-        errorexit("invalid owner: '%s'\n", owner_arg);
-    }
-    spec->set_owner = owner_given;
-
-    if (spec->size_given) {
-        spec->size = parse_size(size_arg);
-    }
-}
-
-/*
- * create_one - create one file to spec
- *
- * Every exit closes the descriptor and discards
- * an uncommitted file.  Returns 0, or -1.
- */
-static int create_one(const char *path, const struct file_spec *spec)
-{
-    bool file_failed;
-    int fd, ret;
-    int operand_errno;
-    mode_t open_mode;
-    uid_t uid_arg;
-    gid_t gid_arg;
-    char *tmppath;
-    char *backup_name;
-    size_t arglen;
-
-    /* An empty operand names nothing.  A trailing slash names a
-     * directory. */
-    arglen = strlen(path);
-    if (arglen == 0 || path[arglen - 1] == '/') {
-        operand_errno = (arglen == 0) ? ENOENT : EISDIR;
-        output_error("cannot create '%s': %s\n",
-                     path, strerror(operand_errno));
-        return -1;
-    }
-
-    ret = 0;
-    fd = -1;
-    file_failed = false;
-    tmppath = NULL;
-    backup_name = NULL;
-
-    if (spec->parents_mode) {
-        if (make_parents(path) != 0) {
-            output_error("cannot create parent directories "
-                         "for '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    }
-
-    if (spec->force_mode) {
-        fd = temp_open(path, &tmppath);
-        if (fd == -1) {
-            output_error("cannot create a temporary file "
-                         "for '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    } else {
-        if (spec->set_owner) {
-            open_mode = S_IRUSR | S_IWUSR;
-        } else {
-            open_mode = spec->mode;
-        }
-
-        /*
-         * Bypass the umask where the open mode must land exactly: the
-         * private -o mode, and any mode under -A.
-         */
-        if (spec->umask_in_loop) {
-            umask(0);
-        }
-
-        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, open_mode);
-
-        if (spec->umask_in_loop) {
-            umask(spec->creation_umask);
-        }
-
-        if (fd == -1) {
-            output_error("cannot create '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-
-        pending_arm(path);
-    }
-
-    /* The template seeds the file, so --size acts on the result. */
-    if (spec->tmpl != NULL) {
-        if (tmpl_apply(spec->tmpl, fd) != 0) {
-            output_error("cannot copy template to '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    }
-
-    if (spec->size_given) {
-        if (apply_size(fd, spec->size, spec->sparse_mode,
-                       tmpl_tail_hole(spec->tmpl)) != 0) {
-            output_error("cannot set size of '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    }
-
-    if (spec->set_owner) {
-        uid_arg = spec->set_uid ? spec->uid : (uid_t)-1;
-        gid_arg = spec->set_gid ? spec->gid : (gid_t)-1;
-        if (fchown(fd, uid_arg, gid_arg) != 0) {
-            output_error("cannot change ownership of '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    }
-
-    /*
-     * fchown clears the setuid and setgid bits, so the mode goes on
-     * after it.  A replacement is still 0600 from mkstemp.
-     */
-    if (spec->set_owner || spec->force_mode) {
-        if (fchmod(fd, spec->mode & ~spec->effective_umask) != 0) {
-            output_error("cannot set permissions of '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-    }
-
-    if (spec->force_mode) {
-        if (fsync(fd) != 0) {
-            output_error("cannot flush '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-
-        /* Catch deferred write errors before touching the target */
-        if (close(fd) != 0) {
-            fd = -1;
-            output_error("cannot write '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-        fd = -1;
-
-        if (spec->backup_given
-            && make_backup(path, spec->backup_control,
-                           &backup_name) != 0) {
-            output_error("cannot back up '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-
-        if (rename(tmppath, path) != 0) {
-            output_error("cannot replace '%s': %s\n",
-                         path, strerror(errno));
-            if (backup_name != NULL) {
-                unlink(backup_name);
-            }
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-
-        pending_clear();
-
-        if (dirsync_stage(path) != 0) {
-            dirsync_error(path);
-            ret = -1;
-        }
-    } else {
-        if (close(fd) != 0) {
-            fd = -1;
-            output_error("cannot write '%s': %s\n",
-                         path, strerror(errno));
-            ret = -1;
-            file_failed = true;
-            goto cleanup;
-        }
-        fd = -1;
-        pending_clear();
-    }
-
-    if (spec->verbose) {
-        if (backup_name != NULL) {
-            printf("created '%s' (backup: '%s')\n", path, backup_name);
-        } else {
-            printf("created '%s'\n", path);
-        }
-    }
-
-cleanup:
-    if (fd != -1 && close(fd) != 0 && !file_failed) {
-        output_error("cannot close '%s': %s\n", path, strerror(errno));
-        ret = -1;
-    }
-    /* Armed means uncommitted */
-    pending_discard();
-    free(tmppath);
-    free(backup_name);
-
-    return ret;
-}
-
-/*
- * apply_size - bring fd to target bytes
- *
- * A source that stopped in a gap is carried on with one.  Returns 0,
- * or -1 with errno set.
- */
-static int apply_size(int fd, off_t target, bool sparse, bool tail_hole)
-{
-    struct stat st;
-
-    if (fstat(fd, &st) != 0) {
-        return -1;
-    }
-
-    if (target <= st.st_size || sparse || tail_hole) {
-        return ftruncate(fd, target);
-    }
-
-    return fill_range(fd, st.st_size, target - st.st_size);
-}
-
-/* A staging failure may have no directory to name, so the operand
- * stands in for one. */
-static void dirsync_error(const char *fallback)
-{
-    const char *dir;
-
-    dir = dirsync_dir();
-    if (dir != NULL) {
-        output_error("cannot flush directory '%s': %s\n",
-                     dir, strerror(errno));
-    } else {
-        output_error("cannot flush the directory holding '%s': %s\n",
-                     fallback, strerror(errno));
-    }
-}
-
-static void display_version(void)
-{
-    printf("newfile %s\n", VERSION);
-    puts("Copyright (c) 2026 Arka Mondal.");
-    puts("License: BSD-3-Clause.");
-}
-
-/*
- * cleanup_handler - discard the unfinished file, then die of the signal
- *
- * sa_mask blocks everything, so raise() only marks the signal pending
- * and returns.
- */
-static void cleanup_handler(int sig)
-{
-    int saved_errno;
-
-    saved_errno = errno;
-    pending_cleanup();
-    raise(sig);
-    errno = saved_errno;
-}
-
-/* Catch the signals that would otherwise strand an unfinished file. */
-static void setup_sighandlers(void)
-{
-    static const int signals[] = {
-        SIGHUP, SIGINT, SIGPIPE, SIGQUIT, SIGTERM, SIGXCPU
-    };
-    struct sigaction sa, old;
-    size_t i;
-
-    sigfillset(&sa.sa_mask);
-
-    /* Ignore: the write reports EFBIG and later operands still run */
-    sa.sa_flags = 0;
-    sa.sa_handler = SIG_IGN;
-    sigaction(SIGXFSZ, &sa, NULL);
-
-    /* SA_RESETHAND, or the re-raise re-enters the handler */
-    sa.sa_flags = (int)(SA_RESTART | SA_RESETHAND);
-    sa.sa_handler = cleanup_handler;
-
-    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
-        if (sigaction(signals[i], NULL, &old) == 0
-            && old.sa_handler != SIG_IGN) {
-            sigaction(signals[i], &sa, NULL);
+            close(nfd);
         }
     }
 }

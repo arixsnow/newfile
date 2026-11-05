@@ -7,8 +7,8 @@
 
 /* optparse.c - command-line option parser */
 
+#include "newfile.h"
 #include "optparse.h"
-#include <stdlib.h>
 #include <string.h>
 
 char *opt_arg = NULL;
@@ -16,39 +16,20 @@ int opt_ind = 1;
 int opt_opt = 0;
 const char *opt_name = NULL;
 
-/* Position inside a bundle such as -pfv, NULL between elements. */
 static char *nextchar;
 static int started;
 
 static void permute(int argc, char **argv, const char *optstring,
                     const struct opt_option *longopts);
-static int long_takes_arg(const char *arg,
-                          const struct opt_option *longopts);
+static void rotate(char **argv, int first, int middle, int last);
+static void reverse(char **argv, int first, int last);
+static int long_takes_arg(const char *arg, const struct opt_option *longopts);
 static int cluster_takes_arg(const char *chars, const char *optstring);
-static int parse_long(int argc, char **argv,
-                      const struct opt_option *longopts, int *longindex);
+static int parse_long(int argc, char **argv, const struct opt_option *longopts,
+                      int *longindex);
 static int parse_short(int argc, char **argv, const char *optstring);
 
-/*
- * optparse_long - parse the next option from argv
- *
- * optstring lists the short options,
- * where a trailing ':' marks a required argument and '::' an optional
- * one.  longopts is terminated by a zeroed entry, and longindex, when
- * not NULL, receives the index that matched.  Long options must be
- * spelled in full.
- *
- * Operands are moved behind the options, so opt_ind indexes the first
- * of them once -1 is returned.  Nothing is printed.  Errors come back
- * as '?' for an unknown option, ':' for a missing required argument,
- * and '=' for an argument given to a long option that takes none, with
- * opt_opt set for short options and opt_name for long ones.  An unknown
- * long option leaves opt_name pointing at the argument as it was typed,
- * including any "=value".  A recognized one leaves it pointing at the
- * name in longopts.  Returns 0 after storing through a flag entry, -1
- * when no options remain, and the option's val otherwise.  Setting
- * opt_ind to 0 restarts the scan.
- */
+/* Returns val, 0 for a flag entry, '?', ':' or '=' on error, -1 at the end. */
 int optparse_long(int argc, char **argv, const char *optstring,
                   const struct opt_option *longopts, int *longindex)
 {
@@ -95,83 +76,63 @@ int optparse_long(int argc, char **argv, const char *optstring,
     return parse_short(argc, argv, optstring);
 }
 
-/*
- * permute - move options and their arguments ahead of the operands
- *
- * Both sequences keep their order.  Skipped if the scratch array cannot
- * be allocated, leaving the POSIX behaviour of stopping at the first
- * operand.
- */
 static void permute(int argc, char **argv, const char *optstring,
                     const struct opt_option *longopts)
 {
-    char **scratch, **opts, **rest;
-    char *arg;
-    int nopts, nrest, i;
+    const char *arg;
+    int end, start, i;
 
-    if (argc < 2) {
-        return;
-    }
-
-    scratch = malloc(sizeof(char *) * (size_t)argc * 2);
-    if (scratch == NULL) {
-        return;
-    }
-
-    opts = scratch;
-    rest = scratch + argc;
-    nopts = 0;
-    nrest = 0;
+    end = 1;
     i = 1;
-
     while (i < argc) {
         arg = argv[i];
+        start = i++;
 
         if (strcmp(arg, "--") == 0) {
-            opts[nopts++] = arg;
-            i++;
-            while (i < argc) {
-                rest[nrest++] = argv[i++];
-            }
-            break;
+            rotate(argv, end, start, i);
+            return;
         }
 
         if (arg[0] != '-' || arg[1] == '\0') {
-            rest[nrest++] = arg;
-            i++;
             continue;
         }
 
-        opts[nopts++] = arg;
-        i++;
-
         if (arg[1] == '-') {
             if (long_takes_arg(arg + 2, longopts) && i < argc) {
-                opts[nopts++] = argv[i++];
+                i++;
             }
         } else if (cluster_takes_arg(arg + 1, optstring) && i < argc) {
-            opts[nopts++] = argv[i++];
+            i++;
         }
-    }
 
-    for (i = 0; i < nopts; i++) {
-        argv[1 + i] = opts[i];
+        rotate(argv, end, start, i);
+        end += i - start;
     }
-    for (i = 0; i < nrest; i++) {
-        argv[1 + nopts + i] = rest[i];
-    }
-
-    free(scratch);
 }
 
-/*
- * long_takes_arg - does this long option consume the next argv element?
- *
- * arg may carry an "=value" suffix.  An optional argument must be
- * attached, so it never consumes one.
- */
-static int long_takes_arg(const char *arg,
-                          const struct opt_option *longopts)
+/* Moves argv[middle..last) in front of argv[first..middle). */
+static void rotate(char **argv, int first, int middle, int last)
+{
+    reverse(argv, first, middle);
+    reverse(argv, middle, last);
+    reverse(argv, first, last);
+}
+
+static void reverse(char **argv, int first, int last)
+{
+    char *held;
+
+    last--;
+    while (first < last) {
+        held = argv[first];
+        argv[first] = argv[last];
+        argv[last] = held;
+        first++;
+        last--;
+    }
+}
+
+static int long_takes_arg(const char *arg, const struct opt_option *longopts)
 {
     size_t len;
     int i;
@@ -191,10 +152,6 @@ static int long_takes_arg(const char *arg,
     return 0;
 }
 
-/*
- * cluster_takes_arg - does the last option in a bundle consume the next
- * argv element?
- */
 static int cluster_takes_arg(const char *chars, const char *optstring)
 {
     const char *spec;
@@ -218,8 +175,8 @@ static int cluster_takes_arg(const char *chars, const char *optstring)
     return 0;
 }
 
-static int parse_long(int argc, char **argv,
-                      const struct opt_option *longopts, int *longindex)
+static int parse_long(int argc, char **argv, const struct opt_option *longopts,
+                      int *longindex)
 {
     char *name, *eq;
     size_t len;

@@ -1,3 +1,266 @@
+2026-11-05  Arka Mondal  <arka@arkamondal.net>
+
+	Version 0.3.0.
+
+	* src/newfile.h: Keep only the feature test macros, VERSION,
+	BUG_URL, NEWFILE_BATCH and the attribute macros.  Move each
+	declaration to the header of the file that defines it.
+	* src/main.c (main): Parse the options, install the signal
+	handlers, open the template and run the batches, then close
+	standard output and standard error.  Fail when either cannot be
+	closed.
+	(reserve_std_fds): New function.
+	(parse_options): Move to spec.c as spec_parse.
+	(apply_size): Move to batch.c.
+	(display_version): Move to options.c as options_version.
+	(cleanup_handler): Move to pending.c.
+	(setup_sighandlers): Move to pending.c as pending_install.
+	(create_one, dirsync_error): Remove.
+	* src/spec.c, src/spec.h: New files.
+	(spec_parse): Return the index of the first operand.  Drop the
+	umask fields.
+	(spec_reset, spec_option, spec_misuse, spec_check, spec_values)
+	(backup_control_known): New functions.  spec_values sets
+	uid_changes when -o names a user other than the caller.
+	* src/batch.c, src/batch.h: New files.
+	(batch_run): New function.  Process operands in batches.  Build
+	every file in a batch, flush them together, name them, flush them
+	again with their directories, then report in operand order.  Stop
+	the flush workers at the end.
+	(build_one, open_built, finish_built): New functions.  Create an
+	empty file with no owner and no exact mode in one open.  Build any
+	other file unnamed, or under a temporary name created with mode
+	0600.  Set its mode last, from the permission bits a new file gets
+	in its directory and the requested set-user-ID, set-group-ID and
+	sticky bits.  When -o gives the file to another user, give an
+	unnamed file its temporary name before changing the owner.
+	(fill_one, flush_batch, name_one, settle_batch, report_one)
+	(op_fail, batch_size): New functions.
+	(flush_ops, close_op, dir_unflushed): New functions.
+	(settle_batch): Fail a file whose descriptor cannot be closed.
+	(replace_one): New function.  Link the backup first.  Exchange the
+	new file with the old where the filesystem can, otherwise flush
+	the directory, then rename.  Block signals from the first exchange
+	in a batch until drop_spares.
+	(drop_spares): New function.  Remove the old files' temporary
+	names once the directories are flushed.  Keep a name, with a
+	warning, only where its own directory failed to flush.
+	(settle_batch, drop_spares, replace_one, report_one): Fail the run
+	when a temporary name cannot be removed from the file's directory.
+	(apply_size): Move from main.c.  Take the size as 0 when nothing
+	was copied into the file.
+	* src/fileops.c: Remove.
+	(pending_arm, pending_clear): Move to pending.c.
+	(make_parents, dir_of, dir_prefix_len, ensure_directory): Move to
+	paths.c.
+	(make_backup): Move to backup.c as backup_make.
+	(temp_open, pending_discard, pending_cleanup)
+	(find_next_backup_number, dirsync_stage, dirsync_flush)
+	(dirsync_dir, dirsync_release): Remove.
+	* src/pending.c, src/pending.h: New files.
+	(pending_arm, pending_clear): Move from fileops.c.  Track one name
+	for each file in a batch and one for a backup.  pending_arm records
+	the device and inode of the armed name.
+	(pending_remove): New function.  Remove a name only while it holds
+	the file it was armed with.  Report a name that cannot be removed,
+	or that holds a different file and is kept, as an error, and
+	return -1.
+	(pending_retarget, pending_unlink): New functions.
+	(pending_hold, pending_release): New functions.  Block every
+	signal, then restore the mask.
+	(cleanup_handler): Remove each armed name that still holds its
+	file, then raise the signal again.  Exit with status 1 if it
+	cannot be raised.
+	(pending_install): Also catch SIGALRM, SIGUSR1, SIGUSR2, SIGILL,
+	SIGTRAP, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGSYS, SIGVTALRM,
+	SIGPROF, SIGPOLL, SIGPWR and SIGSTKFLT, each signal that not every
+	architecture defines only where it is defined.
+	* src/place.c, src/place.h: New files.
+	(temp_make): New function.  Create under a free temporary name
+	taken from getentropy.  Arm the name with signals blocked.
+	(create_excl, temp_fill, make_open, make_fdlink, make_link): New
+	functions.
+	(place_create, place_temp, place_temp_link, place_temp_alias): New
+	functions.
+	(place_commit, place_over): New functions.  Name a temporary file
+	by exclusive rename, then hard link, then over an empty 0600
+	placeholder.  Report a placeholder that cannot be removed.
+	(place_probe_mode, place_probe_reset): New functions.  Learn the
+	mode a new file gets in a directory from an empty file, once per
+	directory in a batch.
+	(place_rename, place_exchange): New functions.  Update the armed
+	names with signals blocked.
+	* src/paths.c, src/paths.h: New files.
+	(path_make_parents): Rename from make_parents.  Queue the
+	directory holding each new directory for a flush.
+	(path_dir, path_dir_len): Rename from dir_of and dir_prefix_len.
+	* src/backup.c, src/backup.h: New files.
+	(backup_make): Rename from make_backup.  Number from the highest
+	existing backup, kept as decimal digits.  Skip a taken number
+	instead of replacing it.  Move a simple backup in with rename.
+	Probe .~1~ by name where the directory may not be read, and fail
+	the backup on any other listing error.  Return 1 when the
+	temporary name of a simple backup is left behind.
+	(backup_cache_reset, backup_dir_get, backup_dir_list)
+	(entries_keep_highest, backup_best, backup_find, backup_note)
+	(backup_next): New functions.  List each directory's backups once
+	per batch.  Keep a listing only once it succeeds.
+	(backup_dir_free): New function.
+	(backup_link): New function.  Arm the backup name with signals
+	blocked.
+	(first_backup_exists, digits_cmp, digits_inc, entry_cmp)
+	(backup_split, backup_name, backup_numbered, backup_simple): New
+	functions.
+	* src/flush.c, src/flush.h: New files.
+	(flush_fds): New function.  Flush several descriptors at once on
+	worker threads, otherwise one after another.
+	(flush_threaded, flush_take, flush_worker, flush_want, flush_grow)
+	(flush_stop): New functions.  Start at most four workers per
+	online CPU, with every signal blocked, and keep them for the run.
+	Flush on the calling thread when no worker can start.  flush_stop
+	returns the pool to its first state.
+	(sync_one): Retry fsync interrupted with EINTR.
+	(flush_dir, flush_set_init, flush_set_add, flush_set_run)
+	(flush_set_failures): New functions.  Flush each directory that
+	gained a name once, and count those that fail.  Flush a directory
+	at once when it cannot be queued.
+	(flush_set_failed, flush_set_forget, dir_failed): New functions.
+	Record the directories that failed to flush in a batch.
+	* src/io.c, src/io.h: New files.
+	(io_write, io_pwrite): Move from template.c as write_buf and
+	write_at.
+	(io_fill): Move from template.c as fill_range.
+	(io_bufsize, io_bufalloc): Move from template.c.
+	* src/template.c (tmpl_open): Reject a directory.  Spool a source
+	that cannot be read twice into an anonymous file when several
+	files need it.  Copy a sparse source whose filesystem cannot map
+	its gaps with zero blocks left as gaps.
+	(copy_zeros, all_zero, tail_zero, spool, copy_slow): New
+	functions.
+	(spool_open): New function.  Block signals while the spool file
+	has a name.  Warn when the name cannot be removed.
+	(tmpl_close): Leave standard input just past the copied content
+	when the copy read it by offset.
+	(read_all): Remove.
+	(write_buf, write_at, fill_range, io_bufsize, io_bufalloc): Move
+	to io.c.
+	* src/fastio.c: Include each header only where the code using it
+	is built.
+	(fast_copy): Clamp each request to SSIZE_MAX.  Fall back to
+	sendfile where copy_file_range refuses.
+	(fast_tmpfile, fast_link, fast_writeback, fast_spool, fast_splice)
+	(fast_rename_noreplace, fast_exchange): New functions.
+	* src/holes.c (hole_unknown, seek_data): New functions.
+	NEWFILE_NO_SEEKHOLE makes SEEK_DATA fail as unsupported.
+	* src/error.c (error_exit, error_print): Rename from errorexit
+	and output_error.
+	(error_close_std): Rename from stdout_ok.  Close standard output,
+	then standard error.  Name the error when standard output fails.
+	Leave standard error open in a sanitizer build.
+	* src/options.c (options_version): Rename from display_version in
+	main.c.
+	(out_width): Test for a digit by range.
+	(notes): Describe the empty placeholder.
+	* src/optparse.c (permute): Move options in front of operands in
+	place, without allocating.
+	(rotate, reverse): New functions.
+	* src/parse.c (parse_owner): Reject the all-ones user and group
+	IDs.
+	(parse_mode, parse_size, parse_owner): Move steps into mode_who,
+	mode_perms, mode_apply, size_multiplier, lookup_uid and
+	lookup_gid.
+	* src/error.h, src/options.h, src/parse.h, src/template.h,
+	src/holes.h, src/fastio.h: New files.
+	* src/parse.h (CHMOD_MODE_BITS): New macro.
+	* src/*.c, src/*.h: Name the numeric constants.  Format with
+	clang-format.
+	* .clang-format, .clang-tidy: New files.
+	* Makefile: Build the new files.  Make each object depend on the
+	headers its source includes.  Link with -lpthread through LIBS.
+	Run check-portable on three builds: NEWFILE_NO_TMPFILE, then
+	NEWFILE_NO_FASTIO with NEWFILE_NO_THREADS, then those with
+	NEWFILE_NO_LINK and NEWFILE_NO_SEEKHOLE.  Build tests/gapcheck.c
+	for check.  Run tests/check.sh for check.  Add check-faults and
+	check-style, with shellcheck on every script and groff -ww on the
+	man page, failing on any warning.  Add check-fs, ci and
+	release-check, which run tests/ci/run.sh.
+	* doc/newfile.1: Describe naming, flushing, numbered backups, zero
+	blocks in sparse templates, cleanup warnings and TMPDIR.  Describe
+	what an interrupted run leaves, and the signals held while old
+	files carry temporary names.  Describe the 0600 temporary names,
+	the empty placeholder, and an old file's name left holding
+	another process's file where names can be exchanged.  Add write
+	errors on the standard streams and a failed close to EXIT STATUS.
+	* README.md: State that newfile runs on Linux, and which
+	distributions the packages are built for.  Show the checks run in
+	containers.
+	* tests/run_tests.sh: Remove, split into tests/cases.
+	* tests/lib.sh, tests/check.sh: New files.  Print TAP 14, give each
+	group of checks its own directory, and skip a check with a reason
+	when its prerequisite is missing.  Run tests/cases in parallel and
+	sum up their results.  Stop a file after TEST_TIMEOUT seconds, 600
+	by default, and report the last check it finished.  Kill whatever
+	a file leaves running.  Fail the run when a file did not run to the
+	end, or when the scratch directory cannot be made.
+	* tests/cases/hangs.sh: New file.  Check that a file that hangs is
+	stopped and reported, that a newfile that dies at once or hangs
+	fails tests/cases/signals.sh and tests/faults.sh without blocking
+	them, and that test files and fault runs that were never made fail
+	the run.
+	* tests/cases/help.sh, tests/cases/options.sh, tests/cases/mode.sh,
+	tests/cases/owner.sh, tests/cases/size.sh, tests/cases/template.sh,
+	tests/cases/create.sh, tests/cases/force.sh, tests/cases/backup.sh,
+	tests/cases/signals.sh, tests/cases/streams.sh: New files, from
+	tests/run_tests.sh.  Test the set-user-ID bit with content,
+	default ACLs, numbered backups, a directory template, the all-ones
+	owner, a closed stdout, batches, a file being filled and a backup
+	name too long to make, where standard input is left after a
+	template, and options between operands and after --.  Skip layout
+	checks where tests/gapcheck finds the filesystem hides its gaps.
+	Size the long name test from NAME_MAX.  Skip checks of permission
+	denial as root.
+	* tests/cases/syscalls.sh: New file.  Under strace, check the modes
+	temporary files are created with, a target replaced during -f -b,
+	spares kept per directory, a placeholder that cannot be removed
+	and a directory that cannot be listed.
+	* tests/cases/root.sh: New file.  As root, check a setgid
+	directory, a file given to another user, and a caller without
+	CAP_FOWNER, also on a passthrough_ll mount.
+	* tests/gapcheck.c, tests/faults.sh: New files.  In tests/faults.sh,
+	stop each run after FAULTS_TIMEOUT seconds, 60 by default.  Count a
+	run that hangs as a violation and start no more runs.  Kill
+	whatever a run leaves running.  Fail the stage when some runs were
+	never made, or when the scratch directory cannot be made.
+	* tests/ci/Containerfile.fedora, tests/ci/Containerfile.ubuntu:
+	New files.  Fedora 44, 45 and rawhide and Ubuntu 26.04 and 26.10
+	images with each distribution's own kernel, and passthrough_ll
+	built from its own libfuse source.  Run catatonit as PID 1.
+	* tests/ci/run.sh, tests/ci/inside.sh: New files.  Run the style
+	checks, the four builds with gcc and clang, the sanitizers, the
+	fault stage and the filesystem matrix in the Fedora 44 image, and
+	each target's package-style build and checks in its own image.
+	Run the suite and tests/faults.sh as tester and as root, on
+	overlayfs, tmpfs, bindfs and fuse-overlayfs, and in a VM booting
+	the image's kernel on ext4, XFS, btrfs, f2fs and NFS.  Limit the
+	time of each image build, job, VM, layout probe and setup command.
+	Print each filesystem and the VM as they start.  Report the whole
+	error and the kernel log when a filesystem cannot be set up.  Give
+	mount the type of each image, so it does not take it from udev.
+	Read back each filesystem's type before testing on it, and show
+	that type in the table.  Report a failed unmount or VM setup, a VM
+	that ends early, and a results directory that stops taking writes.
+	Check for the tools the VM stages need before building.  Allow 120
+	seconds in all for the NFS mount.  Print the end of the kernel log
+	when a job fails.
+	* .github/workflows/dev.yml, .github/workflows/release.yml: New
+	files.  Run tests/ci/run.sh dev on pushes to master and pull
+	requests, and tests/ci/run.sh release on v* tags and on demand.
+	Limit the time of each job.
+	* bench/run_bench.sh: Add BENCH_SRCDIR and a pipe case with four
+	operands.  Count calls across threads.  Stop when a case fails or a
+	source file cannot be written.  Remove the scratch directories when
+	interrupted.
+
 2026-09-12  Arka Mondal  <arka@arkamondal.net>
 
 	* README.md: Drop the build and test detail the Makefile and
