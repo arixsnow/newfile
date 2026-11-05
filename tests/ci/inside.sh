@@ -48,6 +48,11 @@ failed_in() {
     echo "$1" | cut -d' ' -f2
 }
 
+say() {
+    echo "$1"
+    echo "$1" >>"$OUT/progress"
+}
+
 fail() {
     if ! printf '%-7s %s\n' "$1" "$2" >>"$OUT/table" ||
             ! : >"$OUT/failed"; then
@@ -178,12 +183,12 @@ suite() {
         fail "$fs" "$dir is on '$got', not $want"
         return
     fi
-    echo "running: $fs"
     row=$(printf '%-7s %-19s' "$fs" "$got")
     rootfail=0
     violations=0
 
     for b in $BUILDS; do
+        say "running: $fs $b"
         counts=$(check "$OUT/$fs-$b" "$dir" "$b")
         row="$row $(printf '%-12s' "$(cell "$counts")")"
         counts=$(check "$OUT/$fs-$b-root" "$dir" "$b" root)
@@ -376,6 +381,27 @@ need_vm() {
     done
 }
 
+show_progress() {
+    stop=no
+    trap 'stop=yes' TERM
+    shown=0
+    while :; do
+        last=$stop
+        total=0
+        if [ -r "$OUT/progress" ]; then
+            total=$(wc -l <"$OUT/progress")
+        fi
+        if [ "$total" -gt "$shown" ]; then
+            sed -n "$((shown + 1)),${total}p" "$OUT/progress"
+            shown=$total
+        fi
+        if [ "$last" = yes ]; then
+            return
+        fi
+        sleep 5
+    done
+}
+
 run_vm() {
     kver=$(ls /usr/lib/modules)
     cpus=$(getconf _NPROCESSORS_ONLN)
@@ -383,12 +409,15 @@ run_vm() {
         cpus=$VM_CPUS
     fi
     echo "running: vm"
+    : >"$OUT/progress"
     cd / || exit 1
     timeout -k 30 "$VM_TIMEOUT" vng --verbose --run "$kver" --memory 2G \
         --cpus "$cpus" --rwdir "$OUT" \
         --exec "sh $SRC/tests/ci/inside.sh kernel $BUILDS" \
         >"$OUT/vng" 2>&1 &
     vm=$!
+    show_progress &
+    shower=$!
     trap 'kill "$vm" 2>/dev/null' HUP INT TERM
     wait "$vm"
     rc=$?
@@ -397,6 +426,8 @@ run_vm() {
         rc=$?
     done
     trap - HUP INT TERM
+    kill "$shower" 2>/dev/null
+    wait "$shower"
     if [ "$rc" -ne 0 ]; then
         fail vm "virtme-ng failed"
     fi

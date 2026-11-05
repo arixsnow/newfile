@@ -247,12 +247,13 @@
 	overlayfs, tmpfs, bindfs and fuse-overlayfs, and in a VM booting
 	the image's kernel on ext4, XFS, btrfs, f2fs and NFS.  Limit the
 	time of each image build, job, VM, layout probe and setup command.
-	Print each filesystem and the VM as they start.  Report the whole
-	error and the kernel log when a filesystem cannot be set up.  Give
-	mount the type of each image, so it does not take it from udev.
-	Read back each filesystem's type before testing on it, and show
-	that type in the table.  Report a failed unmount or VM setup, a VM
-	that ends early, and a results directory that stops taking writes.
+	Print each filesystem and build as it starts, in the VM as well.
+	Report the whole error and the kernel log when a filesystem cannot
+	be set up.  Give mount the type of each image, so it does not take
+	it from udev.  Read back each filesystem's type before testing on
+	it, and show that type in the table.  Report a failed unmount or VM
+	setup, a VM that ends early, and a results directory that stops
+	taking writes.
 	Check for the tools the VM stages need before building.  Allow 120
 	seconds in all for the NFS mount.  Print the end of the kernel log
 	when a job fails.  Let the sanitize container turn off ASLR, which
