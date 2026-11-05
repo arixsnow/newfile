@@ -9,6 +9,9 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname -- "$0")/../lib.sh"
 
+ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0"
+export ASAN_OPTIONS
+
 PROBE="one probe serves every file in a directory"
 RACE="a target replaced during -f -b exits 1
 the backup holds the file that was backed up
@@ -35,6 +38,17 @@ $1
 EOF
 }
 
+probe() {
+    t_log=$1
+    shift
+    T_CMD="strace -f -qq -o $t_log $*"
+    strace -f -qq -o "$t_log" "$@" 2>"$T_ERR"
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+        bail "a probe failed with status $RC: $T_CMD: $(head -n 1 "$T_ERR")"
+    fi
+}
+
 if ! need_strace; then
     skip_each "only an empty probe is created with the requested mode
 $PROBE
@@ -47,9 +61,8 @@ fi
 begin probe
 printf 'seed\n' >tpl
 mkdir tm
-strace -f -qq -o tm.log \
-    -e trace=openat,unlink,unlinkat,rename,renameat,renameat2 \
-    "$NEWFILE" -m 0666 --template=tpl "$CASE/tm/a" "$CASE/tm/b" 2>"$T_ERR"
+probe tm.log -e trace=openat,unlink,unlinkat,rename,renameat,renameat2 \
+    "$NEWFILE" -m 0666 --template=tpl "$CASE/tm/a" "$CASE/tm/b"
 TM=$(awk '
     match($0, /"[^"]*\/\.newfile\.[^"]*"/) {
         name = substr($0, RSTART, RLENGTH)
@@ -86,8 +99,8 @@ fi
 
 begin race
 printf 'old' >exch
-strace -f -qq -o exch.log -e trace=renameat2 \
-    "$NEWFILE" -f --backup=simple -s 3 "$CASE/exch" 2>"$T_ERR"
+probe exch.log -e trace=renameat2 \
+    "$NEWFILE" -f --backup=simple -s 3 "$CASE/exch"
 EXN=$(awk '/renameat2\(/ { k++ }
            /RENAME_EXCHANGE\) = 0/ { print k; exit }' exch.log)
 if [ -n "$EXN" ]; then
@@ -133,9 +146,8 @@ fi
 
 begin placeholder
 printf 'seed\n' >tpl
-strace -f -qq -o ph0.log \
-    -e trace=openat,rename,renameat,renameat2,unlink,unlinkat \
-    "$NEWFILE" -A -m 0644 --template=tpl "$CASE/ph0" 2>"$T_ERR"
+probe ph0.log -e trace=openat,rename,renameat,renameat2,unlink,unlinkat \
+    "$NEWFILE" -A -m 0644 --template=tpl "$CASE/ph0"
 PH=$(awk -v t="\"$CASE/ph0\"" '
     NR == 1 { main = $1 }
     $1 != main { next }
@@ -178,12 +190,14 @@ for d in nl nlc; do
     printf 'x' >"$d/a.~3~"
     printf 'y' >"$d/b.~5~"
 done
-strace -f -qq -o nlc.log -P "$CASE/nlc" -e trace=openat \
-    "$NEWFILE" -f --backup=numbered -s 1 "$CASE/nlc/a" "$CASE/nlc/b" \
-    2>"$T_ERR"
+probe nlc.log -P "$CASE/nlc" -e trace=openat \
+    "$NEWFILE" -f --backup=numbered -s 1 "$CASE/nlc/a" "$CASE/nlc/b"
 NLN=$(awk '/openat\(/ { k++ } /O_DIRECTORY/ { print k; exit }' nlc.log)
+if [ -z "$NLN" ]; then
+    bail "the probe saw no directory being listed"
+fi
 run strace -f -qq -o /dev/null -P "$CASE/nl" -e trace=openat \
-    -e inject=openat:error=EMFILE:when="${NLN:-1}" \
+    -e inject=openat:error=EMFILE:when="$NLN" \
     "$NEWFILE" -f --backup=numbered -s 1 "$CASE/nl/a" "$CASE/nl/b"
 check_rc "a directory that cannot be listed fails that backup" 1
 check_err "the failed backup is reported" "cannot back up '$CASE/nl/a'"

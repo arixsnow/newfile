@@ -20,8 +20,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  image:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    outputs:
+      key: ${{ steps.name.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: name
+        run: |
+          hash=$(sha256sum tests/ci/Containerfile.fedora | cut -c1-12)
+          week=$(date -u +%G-W%V)
+          echo "key=newfile-ci-fedora-44-$hash-$week" >>"$GITHUB_OUTPUT"
+      - id: cached
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image.tar
+          key: ${{ steps.name.outputs.key }}
+          lookup-only: true
+      - if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          sudo sh tests/ci/run.sh dev image
+          sudo podman save --output "$RUNNER_TEMP/image.tar" \
+              localhost/newfile-ci:fedora-44
+          sudo chown "$(id -u)" "$RUNNER_TEMP/image.tar"
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image.tar
+          key: ${{ steps.name.outputs.key }}
+
   check:
     name: ${{ matrix.job }}
+    needs: image
     runs-on: ubuntu-26.04
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
@@ -38,4 +71,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: sudo sh tests/ci/run.sh dev ${{ matrix.job }}
+      - id: cached
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image.tar
+          key: ${{ needs.image.outputs.key }}
+      - if: steps.cached.outputs.cache-hit == 'true'
+        run: |
+          if sudo podman load --input "$RUNNER_TEMP/image.tar"; then
+              echo "CI_IMAGE_LOADED=1" >>"$GITHUB_ENV"
+          fi
+          rm -f "$RUNNER_TEMP/image.tar"
+      - run: |
+          sudo env CI_IMAGE_LOADED="${CI_IMAGE_LOADED:-}" \
+              sh tests/ci/run.sh dev ${{ matrix.job }}

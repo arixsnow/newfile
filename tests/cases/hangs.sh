@@ -4,7 +4,7 @@
 # Use of this source code is governed by a BSD-style license that
 # can be found in the LICENSE file.
 
-# hangs.sh - a test that hangs or never runs fails and leaves nothing running
+# hangs.sh - tests that hang, die or never run fail and leave nothing running
 
 # shellcheck source=tests/lib.sh
 . "$(dirname -- "$0")/../lib.sh"
@@ -92,6 +92,18 @@ check_cases
 check_rc "a test file that finishes passes" 0
 check_gone "and what it left running is stopped" child
 
+begin noisy
+mkdir cases
+cat >cases/noisy.sh <<EOF
+. "$TESTS_DIR/lib.sh"
+run printf 'ok 1 - from a child\nnot ok 2 - from a child\n'
+check_out "a check that fails" "absent"
+tap_done
+EOF
+check_cases
+check_rc "a failed check that shows many lines fails the run" 1
+check_out "and those lines are not counted as checks" "0 passed, 1 failed"
+
 if need_exec; then
     begin crash
     printf '#!/bin/sh\nexit 2\n' >crash
@@ -127,6 +139,21 @@ else
 fi
 
 if need_strace && need_exec; then
+    begin dying
+    cat >dying <<EOF
+#!/bin/sh
+case " \$* " in
+    *" -f "*) exit 3 ;;
+esac
+exec "$NEWFILE" "\$@"
+EOF
+    chmod +x dying
+    run env TESTS=syscalls NEWFILE="$CASE/dying" sh "$TESTS_DIR/check.sh"
+    check_rc "a newfile that dies in a probe fails the syscall tests" 1
+    check_out "and the report names the probe" "a probe failed"
+    check_eq "instead of skipping what the probe decides" "" \
+        "$(grep -F 'no exchanging rename' "$T_OUT")"
+
     begin faults_unmade
     broken_tool xargs
     run env PATH="$CASE/bin:$PATH" FAULTS_SCENARIOS=plain \
@@ -163,6 +190,9 @@ EOF
     check_rc "a newfile that ignores SIGTERM fails the fault runs" 1
     check_gone "and what it started is killed after the fault runs" child
 else
+    skip_why "a newfile that dies in a probe fails the syscall tests"
+    skip_why "and the report names the probe"
+    skip_why "instead of skipping what the probe decides"
     skip_why "fault runs that were never made fail the stage"
     skip_why "and the report says so"
     skip_why "with no scratch directory the fault stage stops"

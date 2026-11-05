@@ -475,6 +475,10 @@ job_test() {
 }
 
 job_sanitize() {
+    if ! setarch -R true 2>/dev/null; then
+        echo "inside.sh: ASLR cannot be turned off for ThreadSanitizer" >&2
+        exit 1
+    fi
     build asan CC=gcc CFLAGS="-O1 -g -fno-omit-frame-pointer \
 -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Werror" \
         LDFLAGS="-fsanitize=address,undefined"

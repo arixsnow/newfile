@@ -201,12 +201,14 @@
 	sum up their results.  Stop a file after TEST_TIMEOUT seconds, 600
 	by default, and report the last check it finished.  Kill whatever
 	a file leaves running.  Fail the run when a file did not run to the
-	end, or when the scratch directory cannot be made.
+	end, or when the scratch directory cannot be made.  Mark every line
+	of a failed check's diagnostics as a TAP comment.
 	* tests/cases/hangs.sh: New file.  Check that a file that hangs is
 	stopped and reported, that a newfile that dies at once or hangs
 	fails tests/cases/signals.sh and tests/faults.sh without blocking
-	them, and that test files and fault runs that were never made fail
-	the run.
+	them, that test files and fault runs that were never made fail the
+	run, that a failed check showing many lines counts once, and that a
+	newfile that dies in a probe fails tests/cases/syscalls.sh.
 	* tests/cases/help.sh, tests/cases/options.sh, tests/cases/mode.sh,
 	tests/cases/owner.sh, tests/cases/size.sh, tests/cases/template.sh,
 	tests/cases/create.sh, tests/cases/force.sh, tests/cases/backup.sh,
@@ -222,7 +224,9 @@
 	* tests/cases/syscalls.sh: New file.  Under strace, check the modes
 	temporary files are created with, a target replaced during -f -b,
 	spares kept per directory, a placeholder that cannot be removed
-	and a directory that cannot be listed.
+	and a directory that cannot be listed.  Stop with an error when a
+	probe fails, rather than skip the checks it decides.  Turn off leak
+	detection, which cannot run under strace.
 	* tests/cases/root.sh: New file.  As root, check a setgid
 	directory, a file given to another user, and a caller without
 	CAP_FOWNER, also on a passthrough_ll mount.
@@ -251,11 +255,17 @@
 	that ends early, and a results directory that stops taking writes.
 	Check for the tools the VM stages need before building.  Allow 120
 	seconds in all for the NFS mount.  Print the end of the kernel log
-	when a job fails.
+	when a job fails.  Let the sanitize container turn off ASLR, which
+	ThreadSanitizer needs where the kernel randomizes with 32 bits, and
+	fail before building if it cannot.  Add dev image, which only builds
+	the image.  Skip that build when CI_IMAGE_LOADED is set and the
+	image exists.
 	* .github/workflows/dev.yml, .github/workflows/release.yml: New
 	files.  Run tests/ci/run.sh dev on pushes to master and pull
 	requests, and tests/ci/run.sh release on v* tags and on demand.
-	Limit the time of each job.
+	Limit the time of each job.  In dev.yml, build the image in one job,
+	keep it with actions/cache under the Containerfile's hash and the
+	week, and load it in the other jobs.
 	* bench/run_bench.sh: Add BENCH_SRCDIR and a pipe case with four
 	operands.  Count calls across threads.  Stop when a case fails or a
 	source file cannot be written.  Remove the scratch directories when

@@ -16,7 +16,8 @@ TOP=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 STATUS=0
 
 usage() {
-    echo "usage: $0 dev style|test [gcc|clang]|sanitize|faults|fs|all" >&2
+    echo "usage: $0 dev image|style|sanitize|faults|fs|all" >&2
+    echo "       $0 dev test [gcc|clang]" >&2
     echo "       $0 release $(echo "$TARGETS" | tr ' ' '|')|all" >&2
     exit 2
 }
@@ -55,7 +56,7 @@ job() {
     target=$1
     shift
     echo "=== $target: $*"
-    kvm=
+    extra=
     case $1 in
         fs|release)
             if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -63,13 +64,15 @@ job() {
                 STATUS=1
                 return
             fi
-            kvm="--device /dev/kvm" ;;
+            extra="--device /dev/kvm" ;;
+        sanitize)
+            extra="--security-opt seccomp=unconfined" ;;
     esac
     limit=$(job_limit "$1")
     # shellcheck disable=SC2086
     podman run --rm --timeout "$limit" --security-opt label=disable \
         --security-opt apparmor=unconfined --cap-add SYS_ADMIN \
-        --device /dev/fuse $kvm --tmpfs /mnt/tmpfs:rw,size=512m \
+        --device /dev/fuse $extra --tmpfs /mnt/tmpfs:rw,size=512m \
         -v "$TOP:/src:ro" "localhost/newfile-ci:$target" \
         sh /src/tests/ci/inside.sh "$@"
     rc=$?
@@ -84,8 +87,12 @@ job() {
 
 case ${1:-} in
     dev)
-        image "$DEV" --pull=newer
+        if [ -z "${CI_IMAGE_LOADED:-}" ] ||
+                ! podman image exists "localhost/newfile-ci:$DEV"; then
+            image "$DEV" --pull=newer
+        fi
         case ${2:-} in
+            image) ;;
             style|sanitize|faults|fs) job "$DEV" "$2" ;;
             test)
                 case ${3:-gcc} in

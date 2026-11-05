@@ -84,7 +84,7 @@ fail() {
     printf 'not ok %d - %s\n' "$T_N" "$(t_desc "$1")"
     shift
     for t_line in "$@"; do
-        printf '#   %s\n' "$t_line"
+        printf '%s\n' "$t_line" | sed 's/^/#   /'
     done
     if [ -n "$T_CMD" ]; then
         printf '#   last command: %s (exit %s)\n' "$T_CMD" "$RC"
