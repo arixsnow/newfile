@@ -163,6 +163,12 @@ SCRIPTS = tests/lib.sh tests/check.sh tests/faults.sh tests/cases/*.sh \
 
 check-style:
 	clang-format --dry-run --Werror $(SRCS) $(HDRS)
+	grep -n "$$(printf '\t')" $(SRCS) $(HDRS); \
+	case $$? in \
+	    1) ;; \
+	    0) echo "tabs in the C sources, indent with spaces" >&2; exit 1 ;; \
+	    *) exit 1 ;; \
+	esac
 	shellcheck -x $(SCRIPTS)
 	out=$$(groff -man -ww -z doc/$(NAME).1 2>&1) && [ -z "$$out" ] || { \
 	    echo "$$out" >&2; exit 1; }
