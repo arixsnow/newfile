@@ -257,7 +257,7 @@ int fast_splice(int dst_fd, int src_fd)
     bool moved;
 
     moved = false;
-    for (;;) {
+    while (1) {
         nmoved = splice(src_fd, NULL, dst_fd, NULL, SPLICE_MAX, SPLICE_F_MOVE);
         if (nmoved == 0) {
             return 0;

@@ -154,7 +154,7 @@ static void flush_take(void)
 static void *flush_worker(ATTR_UNUSED void *arg)
 {
     pthread_mutex_lock(&job_lock);
-    for (;;) {
+    while (1) {
         while (!stopping && job.next >= job.n) {
             pthread_cond_wait(&job_ready, &job_lock);
         }

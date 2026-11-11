@@ -467,7 +467,7 @@ static int backup_numbered(const char *filepath, const struct stat *st,
 {
     char *name;
 
-    for (;;) {
+    while (1) {
         name = backup_name(filepath, *digits);
         if (name == NULL) {
             return -1;
