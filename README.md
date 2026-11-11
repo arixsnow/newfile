@@ -86,7 +86,7 @@ sh tests/ci/run.sh dev all
 sh tests/ci/run.sh release all
 ```
 
-The first runs every development check on Fedora 44. The second builds and
+The first runs every development check on Fedora 45. The second builds and
 tests newfile on each distribution it ships to, with that distribution's
 package build flags. The filesystem checks in both also need `/dev/kvm`.
 

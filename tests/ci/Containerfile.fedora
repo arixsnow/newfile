@@ -5,7 +5,7 @@
 
 # Containerfile.fedora - the Fedora image the checks run in
 
-ARG RELEASE=44
+ARG RELEASE=45
 FROM registry.fedoraproject.org/fedora:${RELEASE}
 
 RUN dnf -y install --setopt=install_weak_deps=False \

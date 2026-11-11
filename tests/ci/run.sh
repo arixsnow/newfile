@@ -8,7 +8,7 @@
 
 set -u
 
-DEV=fedora-44
+DEV=fedora-45
 TARGETS="fedora-44 fedora-45 fedora-rawhide ubuntu-26.04 ubuntu-26.10"
 BUILD_LIMIT=1800
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)

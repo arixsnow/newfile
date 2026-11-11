@@ -17,7 +17,9 @@ Checks: >-
   -readability-implicit-bool-conversion,
   -readability-identifier-length,
   -readability-isolate-declaration,
+  -readability-trailing-comma,
   -bugprone-easily-swappable-parameters,
+  -bugprone-signed-bitwise,
   -concurrency-mt-unsafe
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'src/.*\.h$'

@@ -1,3 +1,12 @@
+2026-11-11  Arka Mondal  <arka@arkamondal.net>
+
+	* tests/ci/run.sh (DEV): Run the development checks on Fedora 45.
+	* tests/ci/Containerfile.fedora (RELEASE): Default to 45.
+	* .github/workflows/dev.yml: Cache and load the Fedora 45 image.
+	* README.md: Say the development checks run on Fedora 45.
+	* .clang-tidy (Checks): Turn off readability-trailing-comma and
+	bugprone-signed-bitwise.
+
 2026-11-06  Arka Mondal  <arka@arkamondal.net>
 
 	* Makefile (check-style): Fail when a C source file contains a tab.

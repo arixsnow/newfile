@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that
 # can be found in the LICENSE file.
 
-# dev.yml - the development checks on Fedora 44
+# dev.yml - the development checks on Fedora 45
 
 name: dev
 
@@ -33,7 +33,7 @@ jobs:
         run: |
           hash=$(sha256sum tests/ci/Containerfile.fedora | cut -c1-12)
           week=$(date -u +%G-W%V)
-          echo "key=newfile-ci-fedora-44-$hash-$week" >>"$GITHUB_OUTPUT"
+          echo "key=newfile-ci-fedora-45-$hash-$week" >>"$GITHUB_OUTPUT"
       - id: cached
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -44,7 +44,7 @@ jobs:
         run: |
           sudo sh tests/ci/run.sh dev image
           sudo podman save --output "$RUNNER_TEMP/image.tar" \
-              localhost/newfile-ci:fedora-44
+              localhost/newfile-ci:fedora-45
           sudo chown "$(id -u)" "$RUNNER_TEMP/image.tar"
       - if: steps.cached.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
