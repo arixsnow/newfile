@@ -67,36 +67,72 @@ begin fuse
 FUSE="without CAP_FOWNER a FUSE server's file is made
 the FUSE server's file belongs to that user
 the FUSE mount holds no temporary file"
-fuse_skip() {
+FUSE_DIR=$CASE/pt
+FUSE_PID=
+FUSE_WHY=
+
+fuse_all() {
     while read -r d; do
-        skip "$d" "$1"
+        "$1" "$d" "$2"
     done <<EOF
 $FUSE
 EOF
 }
-if ! need_cmd passthrough_ll; then
-    fuse_skip "$T_WHY"
-elif [ "$(cat /proc/sys/fs/protected_hardlinks)" != 1 ]; then
-    fuse_skip "fs.protected_hardlinks is off"
-else
-    mkdir back mnt
-    if passthrough_ll -o source="$CASE/back" "$CASE/mnt" 2>"$T_ERR"; then
-        T_UMOUNT=$CASE/mnt
-        run without_fowner "$NEWFILE" -o "$OTHER_UID" -m 4755 \
-            --template="$T_ROOT/tpl" "$CASE/mnt/f"
-        check_rc "without CAP_FOWNER a FUSE server's file is made" 0
-        check_eq "the FUSE server's file belongs to that user" \
-            "$OTHER_UID 4755" "$(stat -c '%u %a' mnt/f 2>&1)"
-        check_no_temps "the FUSE mount holds no temporary file" mnt
-        umount "$CASE/mnt"
-        T_UMOUNT=
-    else
-        while read -r d; do
-            fail "$d" "passthrough_ll did not mount: $(cat "$T_ERR")"
-        done <<EOF
-$FUSE
-EOF
+
+# passthrough_ll tells files apart by inode number alone, so it serves a
+# tmpfs of its own. Over bindfs on ext4, a removed file's number can come
+# back while the server still holds the old file.
+fuse_up() {
+    if ! { mkdir "$FUSE_DIR" &&
+            mount -t tmpfs -o size=1m tmpfs "$FUSE_DIR"; } 2>"$T_ERR"; then
+        FUSE_WHY="no tmpfs for passthrough_ll: $(cat "$T_ERR")"
+        return 1
     fi
+    T_UNDO=fuse_down
+    mkdir "$FUSE_DIR/src" "$FUSE_DIR/mnt"
+    passthrough_ll -f -o source="$FUSE_DIR/src" "$FUSE_DIR/mnt" \
+        >"$CASE/server.err" 2>&1 &
+    FUSE_PID=$!
+    i=0
+    while ! findmnt -n --mountpoint "$FUSE_DIR/mnt" >/dev/null; do
+        if ! kill -0 "$FUSE_PID" 2>/dev/null; then
+            FUSE_WHY="passthrough_ll did not mount: $(cat "$CASE/server.err")"
+            return 1
+        fi
+        if [ "$i" -ge 100 ]; then
+            FUSE_WHY="passthrough_ll did not mount within 10 seconds"
+            return 1
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+}
+
+fuse_down() {
+    if [ -n "$FUSE_PID" ]; then
+        umount "$FUSE_DIR/mnt" 2>/dev/null || kill "$FUSE_PID" 2>/dev/null
+        # The tmpfs stays busy until the server has exited.
+        wait "$FUSE_PID"
+        FUSE_PID=
+    fi
+    umount "$FUSE_DIR"
+    T_UNDO=
+}
+
+if ! need_cmd passthrough_ll; then
+    fuse_all skip "$T_WHY"
+elif [ "$(cat /proc/sys/fs/protected_hardlinks)" != 1 ]; then
+    fuse_all skip "fs.protected_hardlinks is off"
+elif ! fuse_up; then
+    fuse_all fail "$FUSE_WHY"
+else
+    run without_fowner "$NEWFILE" -o "$OTHER_UID" -m 4755 \
+        --template="$T_ROOT/tpl" "$FUSE_DIR/mnt/f"
+    check_rc "without CAP_FOWNER a FUSE server's file is made" 0
+    check_eq "the FUSE server's file belongs to that user" \
+        "$OTHER_UID 4755" "$(stat -c '%u %a' pt/mnt/f 2>&1)"
+    check_no_temps "the FUSE mount holds no temporary file" pt/mnt
+    fuse_down
 fi
 
 tap_done

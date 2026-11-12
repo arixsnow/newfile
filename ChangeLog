@@ -1,3 +1,11 @@
+2026-11-12  Arka Mondal  <arka@arkamondal.net>
+
+	* tests/cases/root.sh (fuse): Serve passthrough_ll from a tmpfs of
+	its own.  Run it in the foreground and wait for it to exit before
+	unmounting the tmpfs.  Say when it does not mount within 10 seconds.
+	* tests/lib.sh (t_cleanup): Run the function T_UNDO names instead of
+	unmounting T_UMOUNT.
+
 2026-11-11  Arka Mondal  <arka@arkamondal.net>
 
 	* tests/ci/run.sh (DEV): Run the development checks on Fedora 45.

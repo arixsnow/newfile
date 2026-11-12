@@ -43,8 +43,8 @@ CASE=$T_ROOT
 # shellcheck disable=SC2329
 t_cleanup() {
     cd / || return
-    if [ -n "${T_UMOUNT:-}" ]; then
-        umount "$T_UMOUNT"
+    if [ -n "${T_UNDO:-}" ]; then
+        "$T_UNDO"
     fi
     if [ "${KEEP:-0}" = 1 ]; then
         echo "# kept $T_ROOT"
